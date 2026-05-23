@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: tailscale-exit-node
-  cancel-in-progress: true # Mematikan runner lama otomatis jika jadwal cron baru masuk
+  cancel-in-progress: true # Mematikan runner lama otomatis jika cron baru masuk
 
 jobs:
   secure-rdp:
@@ -38,40 +38,55 @@ jobs:
           echo "RDP_USER=RDP" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale
+      - name: Install and Connect Tailscale
         run: |
-          Write-Host "Menginstal Tailscale menggunakan Chocolatey..."
-          choco install tailscale -y
-          
-          # Jeda singkat untuk memastikan service Windows Tailscale menyala
-          Start-Sleep -Seconds 5
-          
-          # Refresh env path agar command 'tailscale' bisa langsung dipanggil
-          refreshenv
-
-      - name: Connect Tailscale as Auto Exit Node
-        run: |
-          # Mengaktifkan IP Forwarding di Windows agar Exit Node bisa meneruskan koneksi internet
+          # 1. Aktifkan IP Routing agar Exit Node bisa meneruskan koneksi internet
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
 
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          # 2. Download dan Install
+          Write-Host "Mengunduh Tailscale..."
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
+          
+          Write-Host "Menginstal Tailscale secara silent..."
+          $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
+          $installProcess.WaitForExit()
 
-          # Looping untuk memastikan file benar-benar ada sebelum dieksekusi (Jaring pengaman)
+          # 3. Agresif mencari lokasi eksekusi tailscale.exe
+          $paths = @(
+              "$env:ProgramFiles\Tailscale\tailscale.exe",
+              "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe",
+              "C:\Program Files\Tailscale\tailscale.exe",
+              "C:\Program Files (x86)\Tailscale\tailscale.exe"
+          )
+          
+          $ts = ""
           $retry = 0
-          while (-Not (Test-Path $ts) -and $retry -lt 15) {
-              Write-Host "Menunggu tailscale.exe tersedia... ($retry)"
-              Start-Sleep -Seconds 2
-              $retry++
+          while ($ts -eq "" -and $retry -lt 15) {
+              foreach ($p in $paths) {
+                  if (Test-Path $p) {
+                      $ts = $p
+                      break
+                  }
+              }
+              if ($ts -eq "") {
+                  Write-Host "Menunggu Windows mengekstrak file... ($retry/15)"
+                  Start-Sleep -Seconds 2
+                  $retry++
+              }
           }
 
-          if (-Not (Test-Path $ts)) {
-              Write-Error "FATAL: tailscale.exe tetap tidak ditemukan setelah diinstal!"
+          if ($ts -eq "") {
+              Write-Error "FATAL: tailscale.exe gagal ditemukan di direktori mana pun setelah instalasi!"
               exit 1
           }
 
-          Write-Host "Tailscale siap. Menjalankan autentikasi..."
+          Write-Host "Tailscale sukses ditemukan di: $ts"
           
-          # Autentikasi Tailscale dengan penambahan flag --ephemeral
+          # Simpan path yang valid ke ENV untuk digunakan step 'Get Tailscale IP'
+          echo "TS_PATH=$ts" >> $env:GITHUB_ENV
+
+          # 4. Connect dengan Ephemeral dan Exit Node
+          Write-Host "Menjalankan autentikasi..."
           & $ts up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-runner-$env:GITHUB_RUN_ID `
@@ -94,7 +109,8 @@ jobs:
 
       - name: Get Tailscale IP
         run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          # Memanggil TS_PATH yang sudah dijamin valid dari step sebelumnya
+          $ts = $env:TS_PATH
           $tsIP = & $ts ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
@@ -112,3 +128,4 @@ jobs:
               Write-Host "[$(Get-Date)] Exit Node Active"
               Start-Sleep -Seconds 600
           }
+          
