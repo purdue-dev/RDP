@@ -43,27 +43,33 @@ jobs:
           echo "RDP_USER=RDP" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-           - name: Install Tailscale
+      - name: Install Tailscale
         run: |
           Invoke-WebRequest https://tailscale.com -OutFile ts.msi
           
-          # Menjalankan installer dan memastikan prosesnya benar-benar selesai
-          $process = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru
+          Write-Host "Memulai instalasi Tailscale..."
+          Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait
           
-          # Tambahan jeda 15 detik untuk memastikan Windows mendaftarkan path aplikasi
-          Start-Sleep -Seconds 15
-          
-          # Verifikasi apakah file tailscale.exe sudah benar-benar ada
-          $tsPath = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          if (-not (Test-Path $tsPath)) {
-              Write-Error "Tailscale gagal terinstal di jalur: $tsPath"
-              exit 1
+          # LOOPING FORCE WAIT: Menunggu sampai file tailscale.exe benar-benar muncul di sistem
+          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+          $timeout = 0
+          while (-not (Test-Path $tsPath)) {
+              if ($timeout -gt 12) { # Maksimal menunggu 60 detik (12 x 5 detik)
+                  Write-Error "Gagal: Tailscale tidak kunjung terinstal setelah 60 detik!"
+                  exit 1
+              }
+              Write-Host "Menunggu file eksekusi Tailscale siap... ($($timeout * 5) detik)"
+              Start-Sleep -Seconds 5
+              $timeout++
           }
+          Write-Host "Tailscale berhasil terdeteksi dan siap digunakan!"
 
       - name: Connect Tailscale as Auto Exit Node
         run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          # Menggunakan jalur absolut dengan tanda kutip tunggal literal agar aman dari masalah spasi
+          $ts = 'C:\Program Files\Tailscale\tailscale.exe'
 
+          # Menjalankan perintah menggunakan operator ampersand (&) yang tepat
           & $ts up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-runner-$env:GITHUB_RUN_ID `
