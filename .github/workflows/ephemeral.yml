@@ -163,4 +163,14 @@ jobs:
               Write-Host "[$(Get-Date)] Exit Node Active"
               Start-Sleep -Seconds 600
           }
+
+      - name: Cleanup Tailscale (Graceful Exit)
+        if: always()
+        run: |
+          $ts = $env:TS_PATH
+          if ($ts -ne $null -and (Test-Path $ts)) {
+              Write-Host "Membersihkan exit node dari dashboard..."
+              & $ts logout
+          }
+          
           
