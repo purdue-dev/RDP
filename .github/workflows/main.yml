@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: tailscale-exit-node
-  cancel-in-progress: true # Mematikan runner sebelumnya jika cron baru berjalan
+  cancel-in-progress: true # Mematikan runner lama otomatis jika jadwal cron baru masuk
 
 jobs:
   secure-rdp:
@@ -40,27 +40,38 @@ jobs:
 
       - name: Install Tailscale
         run: |
-          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
-          # Ditambah -NoNewWindow agar proses background tidak menggantung
-          Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -NoNewWindow
+          Write-Host "Menginstal Tailscale menggunakan Chocolatey..."
+          choco install tailscale -y
           
-          # Ditambah jeda agar Windows mematangkan file di Program Files
+          # Jeda singkat untuk memastikan service Windows Tailscale menyala
           Start-Sleep -Seconds 5
           
-          # Verifikasi path untuk mencegah error 'not recognized' di step selanjutnya
-          if (-Not (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe")) {
-              Write-Error "Instalasi gagal: tailscale.exe tidak ditemukan!"
-              exit 1
-          }
+          # Refresh env path agar command 'tailscale' bisa langsung dipanggil
+          refreshenv
 
       - name: Connect Tailscale as Auto Exit Node
         run: |
-          # DITAMBAHKAN: Mengaktifkan IP Forwarding di Windows agar Exit Node bisa meneruskan internet
+          # Mengaktifkan IP Forwarding di Windows agar Exit Node bisa meneruskan koneksi internet
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
 
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
-          # DITAMBAHKAN: flag --ephemeral di bawah
+          # Looping untuk memastikan file benar-benar ada sebelum dieksekusi (Jaring pengaman)
+          $retry = 0
+          while (-Not (Test-Path $ts) -and $retry -lt 15) {
+              Write-Host "Menunggu tailscale.exe tersedia... ($retry)"
+              Start-Sleep -Seconds 2
+              $retry++
+          }
+
+          if (-Not (Test-Path $ts)) {
+              Write-Error "FATAL: tailscale.exe tetap tidak ditemukan setelah diinstal!"
+              exit 1
+          }
+
+          Write-Host "Tailscale siap. Menjalankan autentikasi..."
+          
+          # Autentikasi Tailscale dengan penambahan flag --ephemeral
           & $ts up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-runner-$env:GITHUB_RUN_ID `
