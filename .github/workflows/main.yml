@@ -85,15 +85,15 @@ jobs:
           # Simpan path yang valid ke ENV untuk digunakan step 'Get Tailscale IP'
           echo "TS_PATH=$ts" >> $env:GITHUB_ENV
 
-          # 4. Connect dengan Ephemeral dan Exit Node
+          # 4. Connect (Menghapus flag ephemeral yang salah, menambah unattended)
           Write-Host "Menjalankan autentikasi..."
           & $ts up `
-            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
-            --hostname=gh-runner-$env:GITHUB_RUN_ID `
+            --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
+            --hostname="gh-runner-$env:GITHUB_RUN_ID" `
             --advertise-exit-node `
-            --advertise-tags=tag:github `
+            --advertise-tags="tag:github" `
             --accept-routes `
-            --ephemeral `
+            --unattended `
             --reset
 
           Start-Sleep -Seconds 15
@@ -128,4 +128,3 @@ jobs:
               Write-Host "[$(Get-Date)] Exit Node Active"
               Start-Sleep -Seconds 600
           }
-          
