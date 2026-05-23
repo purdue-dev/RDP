@@ -1,0 +1,166 @@
+name: RDP-FullSetup-withScript
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *' 
+
+concurrency:
+  group: tailscale-exit-node
+  cancel-in-progress: true
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+
+      - name: Enable RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User
+        run: |
+          $password = -join ((33..126) | Get-Random -Count 20 | ForEach-Object {[char]$_})
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+
+          echo "RDP_USER=RDP" >> $env:GITHUB_ENV
+          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+
+      - name: Create Desktop Setup Script
+        run: |
+          $ps1 = "C:\Users\Public\Desktop\Setup.ps1"
+          $bat = "C:\Users\Public\Desktop\Setup-Workspace.bat"
+
+          # Menggunakan literal string (@' ... '@) agar kode di dalamnya aman
+          $ps1Code = @'
+          Write-Host "1. Mengaktifkan Dark Mode..." -ForegroundColor Cyan
+          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
+          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
+
+          Write-Host "2. Mengunduh dan memasang Wallpaper 4K..." -ForegroundColor Cyan
+          $url = "https://4kwallpapers.com/images/wallpapers/windows-11-dark-mode-abstract-background-black-background-7680x4320-8710.png"
+          $img = "$env:TEMP\wallpaper.png"
+          Invoke-WebRequest -Uri $url -OutFile $img
+          
+          # Injeksi C# untuk merubah wallpaper via Windows API
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class WP {
+              [DllImport("user32.dll", CharSet=CharSet.Auto)]
+              public static extern int SystemParametersInfo(int uA, int uP, string lpv, int fu);
+              public static void Set(string p) {
+                  SystemParametersInfo(20, 0, p, 3);
+              }
+          }
+          "@
+          [WP]::Set($img)
+
+          Write-Host "3. Menginstal Brave Browser & VS Code..." -ForegroundColor Cyan
+          choco install brave vscode -y
+
+          Write-Host "4. Menginstal Ubuntu 22.04 LTS (Background)..." -ForegroundColor Cyan
+          wsl --install -d Ubuntu-22.04 --no-launch
+          Start-Sleep -Seconds 15
+
+          Write-Host "5. Konfigurasi WSL (User RDP, Password root) & Instalasi Paket..." -ForegroundColor Cyan
+          # Bypass setup, buat user, dan tetapkan root
+          wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash RDP"
+          wsl -d Ubuntu-22.04 -u root bash -c "echo 'RDP:root' | chpasswd"
+          wsl -d Ubuntu-22.04 -u root bash -c "usermod -aG sudo RDP"
+          wsl -d Ubuntu-22.04 -u root bash -c "echo -e '[user]\ndefault=RDP' > /etc/wsl.conf"
+          
+          # Matikan sementara agar wsl.conf aktif
+          wsl -t Ubuntu-22.04
+          Start-Sleep -Seconds 5
+          
+          # Eksekusi command update, upgrade, install neofetch & nmap secara berantai menggunakan DEBIAN_FRONTEND agar tidak nyangkut nunggu input
+          wsl -d Ubuntu-22.04 -u root bash -c "apt update -y && DEBIAN_FRONTEND=noninteractive apt upgrade -y && DEBIAN_FRONTEND=noninteractive apt install neofetch nmap -y"
+
+          Write-Host "`n=============================================" -ForegroundColor Green
+          Write-Host "Semua setup berhasil! Silakan nikmati Desktop-mu." -ForegroundColor Green
+          Write-Host "=============================================" -ForegroundColor Green
+          pause
+          '@
+
+          Set-Content -Path $ps1 -Value $ps1Code
+
+          # Membuat file .bat sebagai tombol eksekusi yang otomatis meminta hak Administrator
+          $batCode = @'
+          @echo off
+          >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
+          if '%errorlevel%' NEQ '0' (
+              echo Meminta hak akses Administrator untuk setup...
+              echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\getadmin.vbs"
+              echo UAC.ShellExecute "%~s0", "", "", "runas", 1 >> "%temp%\getadmin.vbs"
+              "%temp%\getadmin.vbs"
+              exit /B
+          )
+          if exist "%temp%\getadmin.vbs" ( del "%temp%\getadmin.vbs" )
+          powershell.exe -ExecutionPolicy Bypass -WindowStyle Normal -File "C:\Users\Public\Desktop\Setup.ps1"
+          '@
+
+          Set-Content -Path $bat -Value $batCode
+
+      - name: Install and Connect Tailscale
+        run: |
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
+
+          Write-Host "Mengunduh Tailscale..."
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
+          
+          $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
+          $installProcess.WaitForExit()
+
+          $paths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe", "C:\Program Files\Tailscale\tailscale.exe", "C:\Program Files (x86)\Tailscale\tailscale.exe")
+          
+          $ts = ""
+          $retry = 0
+          while ($ts -eq "" -and $retry -lt 15) {
+              foreach ($p in $paths) { if (Test-Path $p) { $ts = $p; break } }
+              if ($ts -eq "") { Start-Sleep -Seconds 2; $retry++ }
+          }
+          
+          if ($ts -eq "") { exit 1 }
+          echo "TS_PATH=$ts" >> $env:GITHUB_ENV
+
+          & $ts up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-runner-$env:GITHUB_RUN_ID" --advertise-exit-node --advertise-tags="tag:github" --accept-routes --unattended --reset
+          Start-Sleep -Seconds 15
+
+      - name: Show Azure Public Info
+        run: |
+          Write-Host "`n=== AZURE PUBLIC INFO ==="
+          $ipinfo = Invoke-RestMethod https://ipinfo.io/json
+          $ipinfo | ConvertTo-Json -Depth 3
+
+      - name: Get Tailscale IP
+        run: |
+          $ts = $env:TS_PATH
+          $tsIP = & $ts ip -4
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: Display RDP Info
+        run: |
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Tailscale IP : $env:TAILSCALE_IP"
+          Write-Host "Username     : $env:RDP_USER"
+          Write-Host "Password     : $env:RDP_PASS"
+          Write-Host "=========================`n"
+
+      - name: Keep Alive
+        run: |
+          while ($true) {
+              Write-Host "[$(Get-Date)] Exit Node Active"
+              Start-Sleep -Seconds 600
+          }
+          
