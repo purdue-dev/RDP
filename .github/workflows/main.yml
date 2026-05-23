@@ -3,13 +3,11 @@ name: RDP-Azure-ExitNode
 on:
   workflow_dispatch:
   schedule:
-    # FITUR CRON: Berjalan otomatis setiap 5 jam sekali
-    - cron: '0 */5 * * *'
+    - cron: '0 */5 * * *' # Berjalan otomatis setiap 5 jam
 
-# FITUR CONCURRENCY: Mematikan sesi lama secara otomatis jika sesi baru aktif (mencegah tabrakan IP)
 concurrency:
-  group: rdp-exit-node
-  cancel-in-progress: true
+  group: tailscale-exit-node
+  cancel-in-progress: true # Mematikan runner sebelumnya jika cron baru berjalan
 
 jobs:
   secure-rdp:
@@ -17,6 +15,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
+
       - name: Enable RDP
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -30,10 +29,6 @@ jobs:
       - name: Create RDP User
         run: |
           $password = -join ((33..126) | Get-Random -Count 20 | ForEach-Object {[char]$_})
-          
-          # FITUR MASKING: Menyembunyikan password dari log publik GitHub agar tidak bisa di-intercept orang luar
-          echo "::add-mask::$password"
-          
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
@@ -45,37 +40,34 @@ jobs:
 
       - name: Install Tailscale
         run: |
-          Invoke-WebRequest https://tailscale.com -OutFile ts.msi
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
+          # Ditambah -NoNewWindow agar proses background tidak menggantung
+          Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -NoNewWindow
           
-          Write-Host "Memulai instalasi Tailscale..."
-          Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait
+          # Ditambah jeda agar Windows mematangkan file di Program Files
+          Start-Sleep -Seconds 5
           
-          # LOOPING FORCE WAIT: Menunggu sampai file tailscale.exe benar-benar muncul di sistem
-          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
-          $timeout = 0
-          while (-not (Test-Path $tsPath)) {
-              if ($timeout -gt 12) { # Maksimal menunggu 60 detik (12 x 5 detik)
-                  Write-Error "Gagal: Tailscale tidak kunjung terinstal setelah 60 detik!"
-                  exit 1
-              }
-              Write-Host "Menunggu file eksekusi Tailscale siap... ($($timeout * 5) detik)"
-              Start-Sleep -Seconds 5
-              $timeout++
+          # Verifikasi path untuk mencegah error 'not recognized' di step selanjutnya
+          if (-Not (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe")) {
+              Write-Error "Instalasi gagal: tailscale.exe tidak ditemukan!"
+              exit 1
           }
-          Write-Host "Tailscale berhasil terdeteksi dan siap digunakan!"
 
       - name: Connect Tailscale as Auto Exit Node
         run: |
-          # Menggunakan jalur absolut dengan tanda kutip tunggal literal agar aman dari masalah spasi
-          $ts = 'C:\Program Files\Tailscale\tailscale.exe'
+          # DITAMBAHKAN: Mengaktifkan IP Forwarding di Windows agar Exit Node bisa meneruskan internet
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
 
-          # Menjalankan perintah menggunakan operator ampersand (&) yang tepat
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          # DITAMBAHKAN: flag --ephemeral di bawah
           & $ts up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-runner-$env:GITHUB_RUN_ID `
             --advertise-exit-node `
             --advertise-tags=tag:github `
             --accept-routes `
+            --ephemeral `
             --reset
 
           Start-Sleep -Seconds 15
@@ -86,7 +78,7 @@ jobs:
       - name: Show Azure Public Info
         run: |
           Write-Host "`n=== AZURE PUBLIC INFO ==="
-          $ipinfo = Invoke-RestMethod https://ipinfo.io
+          $ipinfo = Invoke-RestMethod https://ipinfo.io/json
           $ipinfo | ConvertTo-Json -Depth 3
 
       - name: Get Tailscale IP
@@ -103,25 +95,9 @@ jobs:
           Write-Host "Password     : $env:RDP_PASS"
           Write-Host "=========================`n"
 
-      - name: Keep Alive with Anti-Idle Activity
+      - name: Keep Alive
         run: |
-          # FITUR ANTI-IDLE: Berhenti di menit ke-350 untuk memberikan jeda waktu shutdown bersih
-          $endTime = (Get-Date).AddMinutes(350)
-          
-          while ((Get-Date) -lt $endTime) {
+          while ($true) {
               Write-Host "[$(Get-Date)] Exit Node Active"
-              
-              # Mengirim 1 paket ping ke DNS Google setiap 5 menit agar mesin terdeteksi aktif bekerja oleh GitHub
-              Test-Connection -ComputerName 8.8.8.8 -Count 1 -Quiet
-              Start-Sleep -Seconds 300
+              Start-Sleep -Seconds 600
           }
-
-      - name: Gracefully Disconnect Tailscale
-        if: always() # FITUR SHUTDOWN: Langkah ini dijamin SELALU jalan meskipun workflow dimatikan/di-cancel
-        run: |
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          if (Test-Path $ts) {
-              Write-Host "Safely logging out from Tailscale network..."
-              & $ts logout
-          }
-          
