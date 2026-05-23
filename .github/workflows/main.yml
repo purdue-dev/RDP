@@ -43,10 +43,22 @@ jobs:
           echo "RDP_USER=RDP" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale
+           - name: Install Tailscale
         run: |
           Invoke-WebRequest https://tailscale.com -OutFile ts.msi
-          Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait
+          
+          # Menjalankan installer dan memastikan prosesnya benar-benar selesai
+          $process = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru
+          
+          # Tambahan jeda 15 detik untuk memastikan Windows mendaftarkan path aplikasi
+          Start-Sleep -Seconds 15
+          
+          # Verifikasi apakah file tailscale.exe sudah benar-benar ada
+          $tsPath = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          if (-not (Test-Path $tsPath)) {
+              Write-Error "Tailscale gagal terinstal di jalur: $tsPath"
+              exit 1
+          }
 
       - name: Connect Tailscale as Auto Exit Node
         run: |
