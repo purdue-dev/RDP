@@ -1,4 +1,4 @@
-name: RDP-v2-inteilligence
+name: RDP-v2-intelliSense
 
 on:
   workflow_dispatch:
@@ -102,7 +102,7 @@ jobs:
           Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
           Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
           Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 1
-          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "ColorPrevalence" -Value 1
+          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "ColorPrevalence" -Value 0
           
           Write-Host "Restarting Explorer untuk apply UI Taskbar..." -ForegroundColor Yellow
           Stop-Process -Name explorer -Force
@@ -141,7 +141,7 @@ jobs:
           netsh advfirewall firewall add rule name="WSL-SSH-Bypass" dir=in action=allow protocol=TCP localport=8022
 
           Write-Host "`nMenghidupkan Telegram Bot Controller secara Siluman..." -ForegroundColor Green
-          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Users\Public\Desktop\Bot.ps1`"" -NoNewWindow
+          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Users\Public\Desktop\Bot.ps1`" 2> `"C:\Users\Public\Desktop\Bot-Error.log`"" -NoNewWindow
           
           Write-Host "=============================================" -ForegroundColor Green
           Write-Host "Setup RDP v2.0 Selesai! Enjoy your God Mode." -ForegroundColor Green
@@ -167,8 +167,8 @@ jobs:
           Set-Content -Path $bat -Value $batCode
 
           # 3. TELEGRAM BOT LISTENER (Off-grid, Long Polling)
-          # Menginjeksi Token dan Kredensial dari GitHub Runner ke file PS1
           $botScriptCode = @"
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
           `$botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
           `$allowedId = "${{ secrets.TELEGRAM_CHAT_ID }}"
           `$ipInfo = "$env:TAILSCALE_IP"
@@ -270,7 +270,6 @@ jobs:
                               `$bmp.Save(`$path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
                               `$graphics.Dispose(); `$bmp.Dispose()
                               
-                              # Menggunakan curl bawaan Win11 untuk form-data
                               curl.exe -s -F "chat_id=`$allowedId" -F "photo=@`$path" "https://api.telegram.org/bot`$botToken/sendPhoto" | Out-Null
                           }
                           default {
