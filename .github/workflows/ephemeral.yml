@@ -149,7 +149,7 @@ jobs:
           $tsIP = & $ts ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-            - name: Display & Send RDP Info to Telegram
+      - name: Display & Send RDP Info to Telegram
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Tailscale IP : $env:TAILSCALE_IP"
