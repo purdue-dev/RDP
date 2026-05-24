@@ -149,7 +149,7 @@ jobs:
           $tsIP = & $ts ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Display RDP Info & Send RDP Info to Telegram
+            - name: Display & Send RDP Info to Telegram
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Tailscale IP : $env:TAILSCALE_IP"
@@ -157,29 +157,27 @@ jobs:
           Write-Host "Password     : $env:RDP_PASS"
           Write-Host "=========================`n"
 
-          # Ambil secret dari GitHub
           $botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
           $chatId = "${{ secrets.TELEGRAM_CHAT_ID }}"
           
           if ($botToken -ne "" -and $chatId -ne "") {
-              Write-Host "Mengirim kredensial ke Telegram..."
+              $apiUrl = "https://api.telegram.org/bot$botToken/sendMessage"
               
-              # Kita pakai plain text agar karakter aneh di password tidak error saat di-parse Markdown
-              $pesan = "🖥️ RDP EXIT NODE SIAP! 🖥️`n`nIP Tailscale : $env:TAILSCALE_IP`nUsername     : $env:RDP_USER`nPassword     : $env:RDP_PASS"
+              # PESAN 1: Hiasan
+              $msg1 = "🚀✨ <b>YOUR RDP IS READY, SIR !</b> ✨🚀`n`n👤 <i>Username:</i> <b>RDP</b>"
+              $payload1 = @{ chat_id = $chatId; text = $msg1; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
+              Invoke-RestMethod -Uri $apiUrl -Method Post -ContentType "application/json" -Body $payload1 | Out-Null
               
-              $payload = @{
-                  chat_id = $chatId
-                  text = $pesan
-              } | ConvertTo-Json
+              # PESAN 2: IP
+              $payload2 = @{ chat_id = $chatId; text = "<code>$env:TAILSCALE_IP</code>"; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
+              Invoke-RestMethod -Uri $apiUrl -Method Post -ContentType "application/json" -Body $payload2 | Out-Null
               
-              try {
-                  Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload
-                  Write-Host "Berhasil terkirim ke Telegram!"
-              } catch {
-                  Write-Host "Gagal mengirim ke Telegram. Cek kembali Token dan Chat ID."
-              }
-          } else {
-              Write-Host "Telegram Token/Chat ID belum diset di Secrets, melewati pengiriman Telegram."
+              # PESAN 3: Password
+              $safePass = $env:RDP_PASS.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
+              $payload3 = @{ chat_id = $chatId; text = "<code>$safePass</code>"; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
+              Invoke-RestMethod -Uri $apiUrl -Method Post -ContentType "application/json" -Body $payload3 | Out-Null
+              
+              Write-Host "Notif Telegram terkirim."
           }
 
 
