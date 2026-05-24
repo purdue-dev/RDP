@@ -31,7 +31,7 @@ jobs:
           netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP" `
             dir=in action=allow protocol=TCP localport=22
 
-      - name: Create RDP User (Alphanumeric Password Fix)
+      - name: Create RDP User
         run: |
           $chars = (48..57) + (65..90) + (97..122)
           $password = -join ($chars | Get-Random -Count 20 | ForEach-Object {[char]$_})
@@ -161,7 +161,7 @@ jobs:
           Write-Host "=============================================" -ForegroundColor Green
           Start-Sleep -Seconds 5
           '@
-          Set-Content -Path $ps1 -Value $ps1Code
+          Set-Content -Path $ps1 -Value $ps1Code -Encoding UTF8
 
           # 2. TRIGGER BAT SCRIPT
           $batCode = @'
@@ -177,154 +177,161 @@ jobs:
           if exist "%temp%\getadmin.vbs" ( del "%temp%\getadmin.vbs" )
           powershell.exe -ExecutionPolicy Bypass -WindowStyle Normal -File "C:\Users\Public\Desktop\Setup.ps1"
           '@
-          Set-Content -Path $bat -Value $batCode
+          Set-Content -Path $bat -Value $batCode -Encoding UTF8
 
-          # 3. TELEGRAM BOT LISTENER (Verbose Mode)
-          $botScriptCode = @"
+          # 3. TELEGRAM BOT LISTENER (ASCII Edition & Safe YAML Inject)
+          $botScriptCode = @'
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          `$botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
-          `$allowedId = "${{ secrets.TELEGRAM_CHAT_ID }}"
-          `$ipInfo = "$env:TAILSCALE_IP"
-          `$passInfo = "$env:RDP_PASS"
+
+          $botToken = "___BOT_TOKEN___"
+          $allowedId = "___CHAT_ID___"
+          $ipInfo = "___IP___"
+          $passInfo = "___PASS___"
 
           Write-Host "=============================================" -ForegroundColor Cyan
           Write-Host "       TELEGRAM BOT CONTROLLER v2.0          " -ForegroundColor Cyan
           Write-Host "=============================================" -ForegroundColor Cyan
-          Write-Host "Target Chat ID: `$allowedId" -ForegroundColor Gray
+          Write-Host "Target Chat ID: $allowedId" -ForegroundColor Gray
 
-          function Log-Error (`$err) {
-              `$logMsg = "[`$(Get-Date)] Error: `$err"
-              Write-Host "`n❌ `$logMsg" -ForegroundColor Red
-              try { Add-Content -Path "C:\Users\Public\Desktop\Bot-Error.log" -Value `$logMsg } catch {}
+          function Log-Error ($err) {
+              $logMsg = "[$(Get-Date)] Error: $err"
+              Write-Host "`n[X] $logMsg" -ForegroundColor Red
+              try { Add-Content -Path "C:\Users\Public\Desktop\Bot-Error.log" -Value $logMsg } catch {}
           }
 
-          if ([string]::IsNullOrEmpty(`$botToken) -or [string]::IsNullOrEmpty(`$allowedId)) {
-              Log-Error "Token Telegram atau Chat ID kosong! Periksa GitHub Secrets Anda."
+          if ([string]::IsNullOrEmpty($botToken) -or [string]::IsNullOrEmpty($allowedId)) {
+              Log-Error "Token Telegram atau Chat ID kosong!"
               exit
           }
 
-          function Send-Msg (`$msg) {
+          function Send-Msg ($msg) {
               try {
-                  `$payload = @{ chat_id = `$allowedId; text = `$msg; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
-                  Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/sendMessage" -Method Post -ContentType "application/json" -Body `$payload | Out-Null
-                  Write-Host "`n📩 Pesan status terkirim ke Telegram." -ForegroundColor Green
-              } catch { Log-Error `$_.Exception.Message }
+                  $payload = @{ chat_id = $allowedId; text = $msg; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
+                  Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload | Out-Null
+                  Write-Host "`n[V] Pesan terkirim ke Telegram." -ForegroundColor Green
+              } catch { 
+                  if ($_.ErrorDetails) { Log-Error $_.ErrorDetails.Message } else { Log-Error $_.Exception.Message }
+              }
           }
 
-          `$offset = 0
-          Write-Host "Mengirim sinyal ONLINE ke Telegram..." -ForegroundColor Yellow
-          Send-Msg "🤖 <b>Bot Controller v2.0 ONLINE!</b>`nSistem siap menerima perintah dari Tuan Besar."
+          $offset = 0
+          Write-Host "[SYS] Bot AKTIF! Menunggu perintah dari HP kamu..." -ForegroundColor Green
 
-          Write-Host "Bot AKTIF! Menunggu perintah dari HP kamu..." -ForegroundColor Green
-          Write-Host "(Terminal sengaja diam karena standby. Tekan CTRL+C jika ingin menyudahi)" -ForegroundColor Yellow
-
-          while (`$true) {
+          while ($true) {
               try {
-                  # Indikator detak jantung bot biar kelihatan ga hang
                   Write-Host "." -NoNewline
-                  `$updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/getUpdates?offset=`$offset&timeout=30" -TimeoutSec 35
-                  foreach (`$update in `$updates.result) {
-                      `$offset = `$update.update_id + 1
-                      `$senderId = `$update.message.from.id.ToString()
-                      `$text = `$update.message.text
+                  $updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/getUpdates?offset=$offset&timeout=30" -TimeoutSec 35
+                  foreach ($update in $updates.result) {
+                      $offset = $update.update_id + 1
+                      $senderId = $update.message.from.id.ToString()
+                      $text = $update.message.text
                       
-                      Write-Host "`n📥 Perintah Masuk: [`$text] dari ID: `$senderId" -ForegroundColor Cyan
+                      Write-Host "`n[>] Perintah: [$text] dari ID: $senderId" -ForegroundColor Cyan
 
-                      if (`$senderId -ne `$allowedId) {
-                          Write-Host "⚠️ Akses ditolak untuk penyusup ID: `$senderId" -ForegroundColor Red
-                          `$payload = @{ chat_id = `$senderId; text = "ACCESS DENIED ⚠️" } | ConvertTo-Json -Depth 3
-                          Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/sendMessage" -Method Post -ContentType "application/json" -Body `$payload | Out-Null
+                      if ($senderId -ne $allowedId) {
+                          Write-Host "[!] Akses ditolak untuk penyusup ID: $senderId" -ForegroundColor Red
+                          $payload = @{ chat_id = $senderId; text = "[!] ACCESS DENIED" } | ConvertTo-Json -Depth 3
+                          Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload | Out-Null
                           continue
                       }
 
-                      if ([string]::IsNullOrWhiteSpace(`$text)) { continue }
+                      if ([string]::IsNullOrWhiteSpace($text)) { continue }
 
-                      switch -Regex (`$text) {
+                      switch -Regex ($text) {
                           "^/ip" {
-                              Send-Msg "🔑 <b>Kredensial RDP:</b>`n`nIP: <code>`$ipInfo</code>`nUser: <code>RDP</code>`nPass: <code>`$passInfo</code>`n`n🐧 WSL Bypass: <code>ssh RDP@`$ipInfo -p 8022</code>"
+                              Send-Msg "[KEY] <b>Kredensial RDP:</b>`n`nIP: <code>$ipInfo</code>`nUser: <code>RDP</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh RDP@$ipInfo -p 8022</code>"
                           }
                           "^/status" {
-                              `$cpu = (Get-WmiObject win32_processor | Measure-Object -Property LoadPercentage -Average).Average
-                              `$os = Get-WmiObject win32_operatingsystem
-                              `$ramFree = [math]::Round(`$os.FreePhysicalMemory / 1024 / 1024, 2)
-                              `$ramTotal = [math]::Round(`$os.TotalVisibleMemorySize / 1024 / 1024, 2)
-                              `$disk = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='C:'"
-                              `$diskFree = [math]::Round(`$disk.FreeSpace / 1GB, 2)
-                              Send-Msg "📊 <b>SYSTEM HEALTH</b> 📊`n⚙️ CPU: `$cpu%`n🧠 RAM Free: `$ramFree GB / `$ramTotal GB`n💽 Disk C: `$diskFree GB Free"
+                              $cpu = (Get-WmiObject win32_processor | Measure-Object -Property LoadPercentage -Average).Average
+                              $os = Get-WmiObject win32_operatingsystem
+                              $ramFree = [math]::Round($os.FreePhysicalMemory / 1024 / 1024, 2)
+                              $ramTotal = [math]::Round($os.TotalVisibleMemorySize / 1024 / 1024, 2)
+                              $disk = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='C:'"
+                              $diskFree = [math]::Round($disk.FreeSpace / 1GB, 2)
+                              Send-Msg "[STATS] <b>SYSTEM HEALTH</b>`n- CPU: $cpu%`n- RAM Free: $ramFree GB / $ramTotal GB`n- Disk C: $diskFree GB Free"
                           }
                           "^/cmd (.+)" {
-                              `$cmd = `$matches[1]
-                              `$out = cmd.exe /c "`$cmd 2>&1" | Out-String
-                              if (`$out.Length -gt 3500) { `$out = `$out.Substring(0,3500) + "... [TRUNCATED]" }
-                              Send-Msg "🖥️ <b>Output CMD:</b>`n<pre>`$out</pre>"
+                              $cmd = $matches[1]
+                              $out = cmd.exe /c "$cmd 2>&1" | Out-String
+                              if ($out.Length -gt 3500) { $out = $out.Substring(0,3500) + "... [TRUNCATED]" }
+                              $safeOut = $out.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
+                              Send-Msg "[CMD] <b>Output:</b>`n<pre>$safeOut</pre>"
                           }
                           "^/wsl (.+)" {
-                              `$wslcmd = `$matches[1]
-                              `$out = wsl -d Ubuntu-22.04 -u root bash -c "`$wslcmd 2>&1" | Out-String
-                              if (`$out.Length -gt 3500) { `$out = `$out.Substring(0,3500) + "... [TRUNCATED]" }
-                              Send-Msg "🐧 <b>Output WSL:</b>`n<pre>`$out</pre>"
+                              $wslcmd = $matches[1]
+                              $out = wsl -d Ubuntu-22.04 -u root bash -c "$wslcmd 2>&1" | Out-String
+                              if ($out.Length -gt 3500) { $out = $out.Substring(0,3500) + "... [TRUNCATED]" }
+                              $safeOut = $out.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
+                              Send-Msg "[WSL] <b>Output:</b>`n<pre>$safeOut</pre>"
                           }
                           "^/expose (\d+)" {
-                              `$port = `$matches[1]
-                              Send-Msg "🌐 Membuka tunnel untuk Port `$port..."
-                              Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:`$port > C:\cf-`$port.log 2>&1" -WindowStyle Hidden
+                              $port = $matches[1]
+                              Send-Msg "[NET] Membuka tunnel untuk Port $port..."
+                              Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:$port > C:\cf-$port.log 2>&1" -WindowStyle Hidden
                               Start-Sleep -Seconds 5
-                              `$cfLog = Get-Content "C:\cf-`$port.log" -Raw
-                              if (`$cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") {
-                                  Send-Msg "✅ <b>Tunnel Aktif!</b>`nURL: <code>`$(`$matches[1])</code>"
+                              $cfLog = Get-Content "C:\cf-$port.log" -Raw
+                              if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") {
+                                  Send-Msg "[V] <b>Tunnel Aktif!</b>`nURL: <code>$($matches[1])</code>"
                               } else {
-                                  Send-Msg "⚠️ Gagal mendapatkan URL. Cek log manual."
+                                  Send-Msg "[X] Gagal mendapatkan URL. Cek log manual."
                               }
                           }
                           "^/download (.+)" {
-                              `$url = `$matches[1]
-                              `$fileName = `$url.Split('/')[-1]
-                              Send-Msg "🚀 Mulai menyedot: <b>`$fileName</b>"
-                              Invoke-WebRequest -Uri `$url -OutFile "C:\Users\RDP\Desktop\`$fileName"
-                              Send-Msg "✅ Download selesai! File ada di Desktop."
+                              $url = $matches[1]
+                              $fileName = $url.Split('/')[-1]
+                              Send-Msg "[DL] Mulai menyedot: <b>$fileName</b>"
+                              Invoke-WebRequest -Uri $url -OutFile "C:\Users\RDP\Desktop\$fileName"
+                              Send-Msg "[V] Download selesai! File ada di Desktop."
                           }
                           "^/killport (\d+)" {
-                              `$port = `$matches[1]
-                              `$proc = Get-NetTCPConnection -LocalPort `$port -ErrorAction SilentlyContinue | Select-Object -First 1
-                              if (`$proc) {
-                                  Stop-Process -Id `$proc.OwningProcess -Force
-                                  Send-Msg "💀 Proses (PID: `$(`$proc.OwningProcess)) di port `$port telah dibantai."
+                              $port = $matches[1]
+                              $proc = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
+                              if ($proc) {
+                                  Stop-Process -Id $proc.OwningProcess -Force
+                                  Send-Msg "[KILL] Proses (PID: $($proc.OwningProcess)) di port $port telah dibantai."
                               } else {
-                                  Send-Msg "🔍 Tidak ada proses yang aktif di port `$port."
+                                  Send-Msg "[?] Tidak ada proses yang aktif di port $port."
                               }
                           }
                           "^/logs (.+)" {
-                              `$file = `$matches[1]
-                              if (Test-Path `$file) {
-                                  `$logData = Get-Content `$file -Tail 20 | Out-String
-                                  Send-Msg "📝 <b>Last 20 Lines:</b>`n<pre>`$logData</pre>"
-                              } else { Send-Msg "⚠️ File tidak ditemukan." }
+                              $file = $matches[1]
+                              if (Test-Path $file) {
+                                  $logData = Get-Content $file -Tail 20 | Out-String
+                                  $safeOut = $logData.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
+                                  Send-Msg "[LOG] <b>Last 20 Lines:</b>`n<pre>$safeOut</pre>"
+                              } else { Send-Msg "[X] File tidak ditemukan." }
                           }
                           "^/screenshot" {
                               Add-Type -AssemblyName System.Windows.Forms
                               Add-Type -AssemblyName System.Drawing
-                              `$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-                              `$bmp = New-Object System.Drawing.Bitmap `$screen.Width, `$screen.Height
-                              `$graphics = [System.Drawing.Graphics]::FromImage(`$bmp)
-                              `$graphics.CopyFromScreen(`$screen.Location, [System.Drawing.Point]::Empty, `$screen.Size)
-                              `$path = "`$env:TEMP\ss.jpg"
-                              `$bmp.Save(`$path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-                              `$graphics.Dispose(); `$bmp.Dispose()
+                              $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                              $bmp = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+                              $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+                              $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+                              $path = "$env:TEMP\ss.jpg"
+                              $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+                              $graphics.Dispose(); $bmp.Dispose()
                               
-                              curl.exe -s -F "chat_id=`$allowedId" -F "photo=@`$path" "https://api.telegram.org/bot`$botToken/sendPhoto" | Out-Null
+                              curl.exe -s -F "chat_id=$allowedId" -F "photo=@$path" "https://api.telegram.org/bot$botToken/sendPhoto" | Out-Null
                           }
                           default {
-                              Send-Msg "❌ Perintah tidak dikenal."
+                              Send-Msg "[?] Perintah tidak dikenal."
                           }
                       }
                   }
               } catch {
-                  Log-Error `$_.Exception.Message
+                  Log-Error $_.Exception.Message
                   Start-Sleep -Seconds 3
               }
           }
-          "@
-          Set-Content -Path $botFile -Value $botScriptCode
+          '@
+
+          $finalBotCode = $botScriptCode -replace "___BOT_TOKEN___", "${{ secrets.TELEGRAM_BOT_TOKEN }}" `
+                                         -replace "___CHAT_ID___", "${{ secrets.TELEGRAM_CHAT_ID }}" `
+                                         -replace "___IP___", $env:TAILSCALE_IP `
+                                         -replace "___PASS___", $env:RDP_PASS
+
+          Set-Content -Path $botFile -Value $finalBotCode -Encoding UTF8
 
       - name: Keep Alive
         run: |
