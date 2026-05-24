@@ -1,4 +1,4 @@
-name: RDP-FullSetup-withScript
+Name: RDP-v2-withIntelligence
 
 on:
   workflow_dispatch:
@@ -16,13 +16,20 @@ jobs:
 
     steps:
 
-      - name: Enable RDP
+      - name: Enable RDP & OpenSSH Server (Host Controller)
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
             -Name "fDenyTSConnections" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
+          
+          Write-Host "Mengaktifkan OpenSSH Server untuk Windows Host..."
+          Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+          Start-Service sshd
+          Set-Service -Name sshd -StartupType 'Automatic'
+          netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP" `
+            dir=in action=allow protocol=TCP localport=22
 
       - name: Create RDP User
         run: |
@@ -36,89 +43,11 @@ jobs:
           echo "RDP_USER=RDP" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Create Desktop Setup Script
-        run: |
-          $ps1 = "C:\Users\Public\Desktop\Setup.ps1"
-          $bat = "C:\Users\Public\Desktop\Setup-Workspace.bat"
-
-          # Menggunakan literal string (@' ... '@) agar kode di dalamnya aman
-          $ps1Code = @'
-          Write-Host "1. Mengaktifkan Dark Mode..." -ForegroundColor Cyan
-          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
-          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
-
-          Write-Host "2. Mengunduh dan memasang Wallpaper 4K..." -ForegroundColor Cyan
-          $url = "https://4kwallpapers.com/images/wallpapers/windows-11-dark-mode-abstract-background-black-background-7680x4320-8710.png"
-          $img = "$env:TEMP\wallpaper.png"
-          Invoke-WebRequest -Uri $url -OutFile $img
-          
-          # Injeksi C# untuk merubah wallpaper via Windows API
-          Add-Type -TypeDefinition @"
-          using System;
-          using System.Runtime.InteropServices;
-          public class WP {
-              [DllImport("user32.dll", CharSet=CharSet.Auto)]
-              public static extern int SystemParametersInfo(int uA, int uP, string lpv, int fu);
-              public static void Set(string p) {
-                  SystemParametersInfo(20, 0, p, 3);
-              }
-          }
-          "@
-          [WP]::Set($img)
-
-          Write-Host "3. Menginstal Brave Browser & VS Code..." -ForegroundColor Cyan
-          choco install brave vscode -y
-
-          Write-Host "4. Menginstal Ubuntu 22.04 LTS (Background)..." -ForegroundColor Cyan
-          wsl --install -d Ubuntu-22.04 --no-launch
-          Start-Sleep -Seconds 15
-
-          Write-Host "5. Konfigurasi WSL (User RDP, Password root) & Instalasi Paket..." -ForegroundColor Cyan
-          # Bypass setup, buat user, dan tetapkan root
-          wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash RDP"
-          wsl -d Ubuntu-22.04 -u root bash -c "echo 'RDP:root' | chpasswd"
-          wsl -d Ubuntu-22.04 -u root bash -c "usermod -aG sudo RDP"
-          wsl -d Ubuntu-22.04 -u root bash -c "echo -e '[user]\ndefault=RDP' > /etc/wsl.conf"
-          
-          # Matikan sementara agar wsl.conf aktif
-          wsl -t Ubuntu-22.04
-          Start-Sleep -Seconds 5
-          
-          # Eksekusi command update, upgrade, install neofetch & nmap secara berantai menggunakan DEBIAN_FRONTEND agar tidak nyangkut nunggu input
-          wsl -d Ubuntu-22.04 -u root bash -c "apt update -y && DEBIAN_FRONTEND=noninteractive apt upgrade -y && DEBIAN_FRONTEND=noninteractive apt install neofetch nmap -y"
-
-          Write-Host "`n=============================================" -ForegroundColor Green
-          Write-Host "Semua setup berhasil! Silakan nikmati Desktop-mu." -ForegroundColor Green
-          Write-Host "=============================================" -ForegroundColor Green
-          pause
-          '@
-
-          Set-Content -Path $ps1 -Value $ps1Code
-
-          # Membuat file .bat sebagai tombol eksekusi yang otomatis meminta hak Administrator
-          $batCode = @'
-          @echo off
-          >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
-          if '%errorlevel%' NEQ '0' (
-              echo Meminta hak akses Administrator untuk setup...
-              echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\getadmin.vbs"
-              echo UAC.ShellExecute "%~s0", "", "", "runas", 1 >> "%temp%\getadmin.vbs"
-              "%temp%\getadmin.vbs"
-              exit /B
-          )
-          if exist "%temp%\getadmin.vbs" ( del "%temp%\getadmin.vbs" )
-          powershell.exe -ExecutionPolicy Bypass -WindowStyle Normal -File "C:\Users\Public\Desktop\Setup.ps1"
-          '@
-
-          Set-Content -Path $bat -Value $batCode
-
       - name: Install and Connect Tailscale
         run: |
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
 
-          Write-Host "Mengunduh Tailscale..."
           Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
-          
           $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
           $installProcess.WaitForExit()
 
@@ -130,18 +59,11 @@ jobs:
               foreach ($p in $paths) { if (Test-Path $p) { $ts = $p; break } }
               if ($ts -eq "") { Start-Sleep -Seconds 2; $retry++ }
           }
-          
           if ($ts -eq "") { exit 1 }
+          
           echo "TS_PATH=$ts" >> $env:GITHUB_ENV
-
           & $ts up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-runner-$env:GITHUB_RUN_ID" --advertise-exit-node --advertise-tags="tag:github" --accept-routes --unattended --reset
           Start-Sleep -Seconds 15
-
-      - name: Show Azure Public Info
-        run: |
-          Write-Host "`n=== AZURE PUBLIC INFO ==="
-          $ipinfo = Invoke-RestMethod https://ipinfo.io/json
-          $ipinfo | ConvertTo-Json -Depth 3
 
       - name: Get Tailscale IP
         run: |
@@ -149,52 +71,232 @@ jobs:
           $tsIP = & $ts ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Display & Send RDP Info to Telegram
+      - name: Send On-Grid Telegram Notification
         run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Tailscale IP : $env:TAILSCALE_IP"
-          Write-Host "Username     : $env:RDP_USER"
-          Write-Host "Password     : $env:RDP_PASS"
-          Write-Host "=========================`n"
-
           $botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
           $chatId = "${{ secrets.TELEGRAM_CHAT_ID }}"
-          
           if ($botToken -ne "" -and $chatId -ne "") {
               $apiUrl = "https://api.telegram.org/bot$botToken/sendMessage"
               
-              # PESAN 1: Hiasan
               $msg1 = "🚀✨ <b>YOUR RDP IS READY, SIR !</b> ✨🚀`n`n👤 <i>Username:</i> <b>RDP</b>"
               $payload1 = @{ chat_id = $chatId; text = $msg1; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
               Invoke-RestMethod -Uri $apiUrl -Method Post -ContentType "application/json" -Body $payload1 | Out-Null
               
-              # PESAN 2: IP
               $payload2 = @{ chat_id = $chatId; text = "<code>$env:TAILSCALE_IP</code>"; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
               Invoke-RestMethod -Uri $apiUrl -Method Post -ContentType "application/json" -Body $payload2 | Out-Null
               
-              # PESAN 3: Password
               $safePass = $env:RDP_PASS.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
               $payload3 = @{ chat_id = $chatId; text = "<code>$safePass</code>"; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
               Invoke-RestMethod -Uri $apiUrl -Method Post -ContentType "application/json" -Body $payload3 | Out-Null
-              
-              Write-Host "Notif Telegram terkirim."
           }
 
+      - name: Create Workstation Scripts (Setup & Bot)
+        run: |
+          $ps1 = "C:\Users\Public\Desktop\Setup.ps1"
+          $bat = "C:\Users\Public\Desktop\Setup-Workspace.bat"
+          $botFile = "C:\Users\Public\Desktop\Bot.ps1"
+
+          # 1. SETUP SCRIPT (Off-grid Installer & Configurator)
+          $ps1Code = @'
+          Write-Host "1. Konfigurasi UI & Dark Mode..." -ForegroundColor Cyan
+          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
+          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
+          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 1
+          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "ColorPrevalence" -Value 1
+          
+          Write-Host "Restarting Explorer untuk apply UI Taskbar..." -ForegroundColor Yellow
+          Stop-Process -Name explorer -Force
+          Start-Sleep -Seconds 2
+
+          Write-Host "2. Wallpaper 4K..." -ForegroundColor Cyan
+          $url = "https://4kwallpapers.com/images/wallpapers/windows-11-dark-mode-abstract-background-black-background-7680x4320-8710.png"
+          $img = "$env:TEMP\wallpaper.png"
+          Invoke-WebRequest -Uri $url -OutFile $img
+          Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class WP { [DllImport(`"user32.dll`", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int uA, int uP, string lpv, int fu); public static void Set(string p) { SystemParametersInfo(20, 0, p, 3); } }"
+          [WP]::Set($img)
+
+          Write-Host "3. Instalasi Tools Dev & Cloudflared..." -ForegroundColor Cyan
+          choco install brave vscode cloudflared -y
+
+          Write-Host "4. Instalasi Ubuntu 22.04 LTS..." -ForegroundColor Cyan
+          wsl --install -d Ubuntu-22.04 --no-launch
+          Start-Sleep -Seconds 15
+
+          Write-Host "5. Konfigurasi WSL (Dev Arsenal & Dual-Core SSH)..." -ForegroundColor Cyan
+          wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash RDP && echo 'RDP:root' | chpasswd && usermod -aG sudo RDP"
+          wsl -d Ubuntu-22.04 -u root bash -c "echo -e '[user]\ndefault=RDP\n[boot]\nsystemd=true' > /etc/wsl.conf"
+          wsl -t Ubuntu-22.04
+          Start-Sleep -Seconds 5
+          
+          wsl -d Ubuntu-22.04 -u root bash -c "apt update -y && DEBIAN_FRONTEND=noninteractive apt install neofetch nmap openssh-server -y"
+          
+          Write-Host "Mengubah port SSH Ubuntu ke 8022..." -ForegroundColor Yellow
+          wsl -d Ubuntu-22.04 -u root bash -c "sed -i 's/^#*Port 22/Port 8022/' /etc/ssh/sshd_config"
+          wsl -d Ubuntu-22.04 -u root bash -c "service ssh restart"
+
+          Write-Host "6. Mengaktifkan Network Bridge (Portproxy Port 8022)..." -ForegroundColor Cyan
+          $wslIP = wsl -d Ubuntu-22.04 -u root bash -c "hostname -I | awk '{print `$1}'" | Out-String
+          $wslIP = $wslIP.Trim()
+          netsh interface portproxy add v4tov4 listenport=8022 listenaddress=0.0.0.0 connectport=8022 connectaddress=$wslIP
+          netsh advfirewall firewall add rule name="WSL-SSH-Bypass" dir=in action=allow protocol=TCP localport=8022
+
+          Write-Host "`nMenghidupkan Telegram Bot Controller secara Siluman..." -ForegroundColor Green
+          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Users\Public\Desktop\Bot.ps1`"" -NoNewWindow
+          
+          Write-Host "=============================================" -ForegroundColor Green
+          Write-Host "Setup RDP v2.0 Selesai! Enjoy your God Mode." -ForegroundColor Green
+          Write-Host "=============================================" -ForegroundColor Green
+          Start-Sleep -Seconds 5
+          '@
+          Set-Content -Path $ps1 -Value $ps1Code
+
+          # 2. TRIGGER BAT SCRIPT
+          $batCode = @'
+          @echo off
+          >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
+          if '%errorlevel%' NEQ '0' (
+              echo Meminta hak akses Administrator...
+              echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\getadmin.vbs"
+              echo UAC.ShellExecute "%~s0", "", "", "runas", 1 >> "%temp%\getadmin.vbs"
+              "%temp%\getadmin.vbs"
+              exit /B
+          )
+          if exist "%temp%\getadmin.vbs" ( del "%temp%\getadmin.vbs" )
+          powershell.exe -ExecutionPolicy Bypass -WindowStyle Normal -File "C:\Users\Public\Desktop\Setup.ps1"
+          '@
+          Set-Content -Path $bat -Value $batCode
+
+          # 3. TELEGRAM BOT LISTENER (Off-grid, Long Polling)
+          # Menginjeksi Token dan Kredensial dari GitHub Runner ke file PS1
+          $botScriptCode = @"
+          `$botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          `$allowedId = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          `$ipInfo = "$env:TAILSCALE_IP"
+          `$passInfo = "$env:RDP_PASS"
+
+          function Send-Msg (`$msg) {
+              `$payload = @{ chat_id = `$allowedId; text = `$msg; parse_mode = "HTML" } | ConvertTo-Json
+              Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/sendMessage" -Method Post -ContentType "application/json" -Body `$payload | Out-Null
+          }
+
+          `$offset = 0
+          Send-Msg "🤖 <b>Bot Controller v2.0 ONLINE!</b>`nSistem siap menerima perintah dari Tuan Besar."
+
+          while (`$true) {
+              try {
+                  `$updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/getUpdates?offset=`$offset&timeout=30" -TimeoutSec 35
+                  foreach (`$update in `$updates.result) {
+                      `$offset = `$update.update_id + 1
+                      `$senderId = `$update.message.from.id.ToString()
+                      `$text = `$update.message.text
+
+                      if (`$senderId -ne `$allowedId) {
+                          `$payload = @{ chat_id = `$senderId; text = "ACCESS DENIED ⚠️" } | ConvertTo-Json
+                          Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/sendMessage" -Method Post -ContentType "application/json" -Body `$payload | Out-Null
+                          continue
+                      }
+
+                      if ([string]::IsNullOrWhiteSpace(`$text)) { continue }
+
+                      switch -Regex (`$text) {
+                          "^/ip" {
+                              Send-Msg "🔑 <b>Kredensial RDP:</b>`n`nIP: <code>`$ipInfo</code>`nUser: <code>RDP</code>`nPass: <code>`$passInfo</code>`n`n🐧 WSL Bypass: <code>ssh RDP@`$ipInfo -p 8022</code>"
+                          }
+                          "^/status" {
+                              `$cpu = (Get-WmiObject win32_processor | Measure-Object -Property LoadPercentage -Average).Average
+                              `$os = Get-WmiObject win32_operatingsystem
+                              `$ramFree = [math]::Round(`$os.FreePhysicalMemory / 1024 / 1024, 2)
+                              `$ramTotal = [math]::Round(`$os.TotalVisibleMemorySize / 1024 / 1024, 2)
+                              `$disk = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='C:'"
+                              `$diskFree = [math]::Round(`$disk.FreeSpace / 1GB, 2)
+                              Send-Msg "📊 <b>SYSTEM HEALTH</b> 📊`n⚙️ CPU: `$cpu%`n🧠 RAM Free: `$ramFree GB / `$ramTotal GB`n💽 Disk C: `$diskFree GB Free"
+                          }
+                          "^/cmd (.+)" {
+                              `$cmd = `$matches[1]
+                              `$out = cmd.exe /c "`$cmd 2>&1" | Out-String
+                              if (`$out.Length -gt 3500) { `$out = `$out.Substring(0,3500) + "... [TRUNCATED]" }
+                              Send-Msg "🖥️ <b>Output CMD:</b>`n<pre>`$out</pre>"
+                          }
+                          "^/wsl (.+)" {
+                              `$wslcmd = `$matches[1]
+                              `$out = wsl -d Ubuntu-22.04 -u root bash -c "`$wslcmd 2>&1" | Out-String
+                              if (`$out.Length -gt 3500) { `$out = `$out.Substring(0,3500) + "... [TRUNCATED]" }
+                              Send-Msg "🐧 <b>Output WSL:</b>`n<pre>`$out</pre>"
+                          }
+                          "^/expose (\d+)" {
+                              `$port = `$matches[1]
+                              Send-Msg "🌐 Membuka tunnel untuk Port `$port..."
+                              Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:`$port > C:\cf-`$port.log 2>&1" -WindowStyle Hidden
+                              Start-Sleep -Seconds 5
+                              `$cfLog = Get-Content "C:\cf-`$port.log" -Raw
+                              if (`$cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") {
+                                  Send-Msg "✅ <b>Tunnel Aktif!</b>`nURL: <code>`$(`$matches[1])</code>"
+                              } else {
+                                  Send-Msg "⚠️ Gagal mendapatkan URL. Cek log manual."
+                              }
+                          }
+                          "^/download (.+)" {
+                              `$url = `$matches[1]
+                              `$fileName = `$url.Split('/')[-1]
+                              Send-Msg "🚀 Mulai menyedot: <b>`$fileName</b>"
+                              Invoke-WebRequest -Uri `$url -OutFile "C:\Users\RDP\Desktop\`$fileName"
+                              Send-Msg "✅ Download selesai! File ada di Desktop."
+                          }
+                          "^/killport (\d+)" {
+                              `$port = `$matches[1]
+                              `$pid = (netstat -ano | findstr `":`$port `" | Select-Object -First 1).Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[-1]
+                              if (`$pid) {
+                                  taskkill /F /PID `$pid | Out-Null
+                                  Send-Msg "💀 Proses (PID: `$pid) di port `$port telah dibantai."
+                              } else {
+                                  Send-Msg "🔍 Tidak ada proses yang jalan di port `$port."
+                              }
+                          }
+                          "^/logs (.+)" {
+                              `$file = `$matches[1]
+                              if (Test-Path `$file) {
+                                  `$logData = Get-Content `$file -Tail 20 | Out-String
+                                  Send-Msg "📝 <b>Last 20 Lines:</b>`n<pre>`$logData</pre>"
+                              } else { Send-Msg "⚠️ File tidak ditemukan." }
+                          }
+                          "^/screenshot" {
+                              Add-Type -AssemblyName System.Windows.Forms
+                              Add-Type -AssemblyName System.Drawing
+                              `$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                              `$bmp = New-Object System.Drawing.Bitmap `$screen.Width, `$screen.Height
+                              `$graphics = [System.Drawing.Graphics]::FromImage(`$bmp)
+                              `$graphics.CopyFromScreen(`$screen.Location, [System.Drawing.Point]::Empty, `$screen.Size)
+                              `$path = "`$env:TEMP\ss.jpg"
+                              `$bmp.Save(`$path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+                              `$graphics.Dispose(); `$bmp.Dispose()
+                              
+                              # Menggunakan curl bawaan Win11 untuk form-data
+                              curl.exe -s -F "chat_id=`$allowedId" -F "photo=@`$path" "https://api.telegram.org/bot`$botToken/sendPhoto" | Out-Null
+                          }
+                          default {
+                              Send-Msg "❌ Perintah tidak dikenal."
+                          }
+                      }
+                  }
+              } catch {
+                  Start-Sleep -Seconds 3
+              }
+          }
+          "@
+          Set-Content -Path $botFile -Value $botScriptCode
 
       - name: Keep Alive
         run: |
           while ($true) {
-              Write-Host "[$(Get-Date)] Exit Node Active"
+              Write-Host "[$(Get-Date)] God Mode Active"
               Start-Sleep -Seconds 600
           }
 
-      - name: Cleanup Tailscale (Graceful Exit)
+      - name: Cleanup Tailscale
         if: always()
         run: |
           $ts = $env:TS_PATH
           if ($ts -ne $null -and (Test-Path $ts)) {
-              Write-Host "Membersihkan exit node dari dashboard..."
+              Write-Host "Membersihkan exit node..."
               & $ts logout
           }
-          
-          
