@@ -1,4 +1,4 @@
-Name: RDP-v2-withIntelligence
+Name: RDP-v2-inteilligence
 
 on:
   workflow_dispatch:
