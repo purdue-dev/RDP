@@ -238,6 +238,25 @@ jobs:
                       if ([string]::IsNullOrWhiteSpace($text)) { continue }
 
                       switch -Regex ($text) {
+                      
+                      "^/(start|help)" {
+                    $helpMsg = "[INFO] <b>DAFTAR PERINTAH BOT v2.0</b>`n`n"
+                    $helpMsg += "🛠️ <b>Sistem & Kontrol:</b>`n"
+                    $helpMsg += "<code>/status</code> - Cek kesehatan CPU, RAM, & Disk`n"
+                    $helpMsg += "<code>/ip</code> - Tampilkan Kredensial RDP & IP Tailscale`n"
+                    $helpMsg += "<code>/screenshot</code> - Intip layar RDP secara live`n`n"
+                    $helpMsg += "💻 <b>Eksekusi Terminal:</b>`n"
+                    $helpMsg += "<code>/cmd [perintah]</code> - Jalankan perintah di Windows CMD`n"
+                    $helpMsg += "<code>/wsl [perintah]</code> - Jalankan perintah di Ubuntu Bash`n`n"
+                    $helpMsg += "🌐 <b>Jaringan & Utilitas:</b>`n"
+                    $helpMsg += "<code>/expose [port]</code> - Buka tunnel Cloudflare ke public`n"
+                    $helpMsg += "<code>/killport [port]</code> - Bantai proses yang nyangkut di port`n"
+                    $helpMsg += "<code>/download [url]</code> - Sedot file langsung ke Desktop RDP`n"
+                    $helpMsg += "<code>/logs [path_file]</code> - Baca 20 baris terakhir dari file log"
+                    
+                    Send-Msg $helpMsg
+                    }
+                
                           "^/ip" {
                               Send-Msg "[KEY] <b>Kredensial RDP:</b>`n`nIP: <code>$ipInfo</code>`nUser: <code>RDP</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh RDP@$ipInfo -p 8022</code>"
                           }
