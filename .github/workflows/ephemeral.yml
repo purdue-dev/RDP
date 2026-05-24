@@ -46,7 +46,6 @@ jobs:
           $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
           $installProcess.WaitForExit()
           
-          # HANYA menginstal tool ringan untuk networking bot di awal booting
           choco install speedtest cloudflared -y
 
           $paths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe")
@@ -74,22 +73,32 @@ jobs:
           $passInfo = "___PASS___"
 
           function Send-Msg ($msg) {
-              $keyboard = @{
-                  keyboard = @(
-                      @(@{text="/ip"}, @{text="/status"}, @{text="/speedtest"}),
-                      @(@{text="/setup"}, @{text="/wsl neofetch"}, @{text="/expose 8022"}),
-                      @(@{text="/help"}, @{text="/cmd whoami"}, @{text="/screenshot"})
-                  )
-                  resize_keyboard = $true
-                  is_persistent = $true
-              }
               try {
-                  $payload = @{ chat_id = $allowedId; text = $msg; parse_mode = "HTML"; reply_markup = $keyboard } | ConvertTo-Json -Depth 5
+                  $payload = @{ chat_id = $allowedId; text = $msg; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
                   Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload | Out-Null
               } catch { Write-Host "Error SendMsg: $_" }
           }
 
-          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKetik /help atau gunakan tombol grid di bawah."
+          # --- INJEKSI NATIVE BOT COMMAND MENU ---
+          Write-Host "Membangun Native Command Menu Telegram..."
+          $menuCommands = @(
+              @{command="help"; description="📖 Tampilkan panduan command"},
+              @{command="status"; description="📊 Cek beban CPU & Sisa RAM"},
+              @{command="ip"; description="🔑 Intip IP & Password RDP"},
+              @{command="speedtest"; description="⚡ Uji kecepatan internet"},
+              @{command="screenshot"; description="📸 Intip layar RDP secara Live"},
+              @{command="setup"; description="🚀 Instalasi GUI Apps & WSL"},
+              @{command="cmd"; description="💻 Remote CMD (Ketik manual via chat)"},
+              @{command="wsl"; description="🐧 Remote Ubuntu (Ketik manual via chat)"},
+              @{command="expose"; description="🌐 Buka tunnel port (Ketik manual via chat)"}
+          )
+          try {
+              $menuPayload = @{ commands = $menuCommands } | ConvertTo-Json -Depth 3
+              Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -Method Post -ContentType "application/json" -Body $menuPayload | Out-Null
+          } catch { Write-Host "Error Set Menu: $_" }
+          # ---------------------------------------
+
+          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
           Send-Msg $initMsg
 
           $offset = 0
@@ -126,10 +135,7 @@ jobs:
                               } else {
                                   Send-Msg "[SYS] <b>Menginstal Workstation Suite di background...</b>`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04`n- OpenSSH DualCore`n`nProses memakan waktu 3-5 menit, bot tetap merespons perintah lain."
                                   Start-Job -ScriptBlock {
-                                      # Instalasi aplikasi berat GUI
                                       choco install brave vscode -y
-                                      
-                                      # Instalasi WSL dengan user rdp (lowercase)
                                       wsl --install -d Ubuntu-22.04 --no-launch
                                       Start-Sleep 15
                                       wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash rdp && echo 'rdp:root' | chpasswd && usermod -aG sudo rdp"
