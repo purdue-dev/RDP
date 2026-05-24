@@ -136,22 +136,24 @@ jobs:
           
           wsl -d Ubuntu-22.04 -u root bash -c "apt update -y && DEBIAN_FRONTEND=noninteractive apt install neofetch nmap openssh-server -y"
           
-          Write-Host "Memaksa konfig SSH Ubuntu (Port 8022 & Allow Password)..." -ForegroundColor Yellow
+          Write-Host "Injeksi konfigurasi SSH ke Ubuntu..." -ForegroundColor Yellow
           wsl -d Ubuntu-22.04 -u root bash -c "echo '' >> /etc/ssh/sshd_config"
           wsl -d Ubuntu-22.04 -u root bash -c "echo 'ListenAddress 0.0.0.0' >> /etc/ssh/sshd_config"
           wsl -d Ubuntu-22.04 -u root bash -c "echo 'Port 8022' >> /etc/ssh/sshd_config"
           wsl -d Ubuntu-22.04 -u root bash -c "echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config"
-          wsl -d Ubuntu-22.04 -u root bash -c "service ssh restart"
-          Start-Sleep -Seconds 3
 
-          Write-Host "6. Mengaktifkan Network Bridge (Portproxy Port 8022)..." -ForegroundColor Cyan
+          Write-Host "6. Mengaktifkan Network Bridge & Portproxy..." -ForegroundColor Cyan
           $wslIPRaw = wsl -d Ubuntu-22.04 -u root bash -c "hostname -I"
           $wslIP = ($wslIPRaw -split '\s+')[0].Trim()
           
           netsh interface portproxy add v4tov4 listenport=8022 listenaddress=0.0.0.0 connectport=8022 connectaddress=$wslIP
           netsh advfirewall firewall add rule name="WSL-SSH-Bypass" dir=in action=allow protocol=TCP localport=8022
 
-          Write-Host "`nMenghidupkan Telegram Bot Controller secara Siluman..." -ForegroundColor Green
+          Write-Host "Memaksa SSH Ubuntu berjalan persistent di Background Windows..." -ForegroundColor Green
+          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -Command `"wsl -d Ubuntu-22.04 -u root /usr/sbin/sshd -D`"" -NoNewWindow
+          Start-Sleep -Seconds 3
+
+          Write-Host "Menghidupkan Telegram Bot Controller secara Siluman..." -ForegroundColor Green
           Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Users\Public\Desktop\Bot.ps1`"" -NoNewWindow
           
           Write-Host "=============================================" -ForegroundColor Green
@@ -177,32 +179,59 @@ jobs:
           '@
           Set-Content -Path $bat -Value $batCode
 
-          # 3. TELEGRAM BOT LISTENER
+          # 3. TELEGRAM BOT LISTENER (Verbose Mode)
           $botScriptCode = @"
-          Start-Transcript -Path `"C:\Users\Public\Desktop\Bot-Log.txt`" -Append
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
           `$botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
           `$allowedId = "${{ secrets.TELEGRAM_CHAT_ID }}"
           `$ipInfo = "$env:TAILSCALE_IP"
           `$passInfo = "$env:RDP_PASS"
 
+          Write-Host "=============================================" -ForegroundColor Cyan
+          Write-Host "       TELEGRAM BOT CONTROLLER v2.0          " -ForegroundColor Cyan
+          Write-Host "=============================================" -ForegroundColor Cyan
+          Write-Host "Target Chat ID: `$allowedId" -ForegroundColor Gray
+
+          function Log-Error (`$err) {
+              `$logMsg = "[`$(Get-Date)] Error: `$err"
+              Write-Host "`n❌ `$logMsg" -ForegroundColor Red
+              try { Add-Content -Path "C:\Users\Public\Desktop\Bot-Error.log" -Value `$logMsg } catch {}
+          }
+
+          if ([string]::IsNullOrEmpty(`$botToken) -or [string]::IsNullOrEmpty(`$allowedId)) {
+              Log-Error "Token Telegram atau Chat ID kosong! Periksa GitHub Secrets Anda."
+              exit
+          }
+
           function Send-Msg (`$msg) {
-              `$payload = @{ chat_id = `$allowedId; text = `$msg; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
-              Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/sendMessage" -Method Post -ContentType "application/json" -Body `$payload | Out-Null
+              try {
+                  `$payload = @{ chat_id = `$allowedId; text = `$msg; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
+                  Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/sendMessage" -Method Post -ContentType "application/json" -Body `$payload | Out-Null
+                  Write-Host "`n📩 Pesan status terkirim ke Telegram." -ForegroundColor Green
+              } catch { Log-Error `$_.Exception.Message }
           }
 
           `$offset = 0
+          Write-Host "Mengirim sinyal ONLINE ke Telegram..." -ForegroundColor Yellow
           Send-Msg "🤖 <b>Bot Controller v2.0 ONLINE!</b>`nSistem siap menerima perintah dari Tuan Besar."
+
+          Write-Host "Bot AKTIF! Menunggu perintah dari HP kamu..." -ForegroundColor Green
+          Write-Host "(Terminal sengaja diam karena standby. Tekan CTRL+C jika ingin menyudahi)" -ForegroundColor Yellow
 
           while (`$true) {
               try {
+                  # Indikator detak jantung bot biar kelihatan ga hang
+                  Write-Host "." -NoNewline
                   `$updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/getUpdates?offset=`$offset&timeout=30" -TimeoutSec 35
                   foreach (`$update in `$updates.result) {
                       `$offset = `$update.update_id + 1
                       `$senderId = `$update.message.from.id.ToString()
                       `$text = `$update.message.text
+                      
+                      Write-Host "`n📥 Perintah Masuk: [`$text] dari ID: `$senderId" -ForegroundColor Cyan
 
                       if (`$senderId -ne `$allowedId) {
+                          Write-Host "⚠️ Akses ditolak untuk penyusup ID: `$senderId" -ForegroundColor Red
                           `$payload = @{ chat_id = `$senderId; text = "ACCESS DENIED ⚠️" } | ConvertTo-Json -Depth 3
                           Invoke-RestMethod -Uri "https://api.telegram.org/bot`$botToken/sendMessage" -Method Post -ContentType "application/json" -Body `$payload | Out-Null
                           continue
@@ -256,12 +285,12 @@ jobs:
                           }
                           "^/killport (\d+)" {
                               `$port = `$matches[1]
-                              `$pid = (netstat -ano | findstr `":`$port `" | Select-Object -First 1).Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[-1]
-                              if (`$pid) {
-                                  taskkill /F /PID `$pid | Out-Null
-                                  Send-Msg "💀 Proses (PID: `$pid) di port `$port telah dibantai."
+                              `$proc = Get-NetTCPConnection -LocalPort `$port -ErrorAction SilentlyContinue | Select-Object -First 1
+                              if (`$proc) {
+                                  Stop-Process -Id `$proc.OwningProcess -Force
+                                  Send-Msg "💀 Proses (PID: `$(`$proc.OwningProcess)) di port `$port telah dibantai."
                               } else {
-                                  Send-Msg "🔍 Tidak ada proses yang jalan di port `$port."
+                                  Send-Msg "🔍 Tidak ada proses yang aktif di port `$port."
                               }
                           }
                           "^/logs (.+)" {
@@ -290,11 +319,10 @@ jobs:
                       }
                   }
               } catch {
-                  Write-Output "`$($_.Exception.Message)"
+                  Log-Error `$_.Exception.Message
                   Start-Sleep -Seconds 3
               }
           }
-          Stop-Transcript
           "@
           Set-Content -Path $botFile -Value $botScriptCode
 
@@ -313,3 +341,4 @@ jobs:
               Write-Host "Membersihkan exit node..."
               & $ts logout
           }
+          
