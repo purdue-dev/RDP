@@ -149,13 +149,39 @@ jobs:
           $tsIP = & $ts ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Display RDP Info
+      - name: Display RDP Info & Send RDP Info to Telegram
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Tailscale IP : $env:TAILSCALE_IP"
           Write-Host "Username     : $env:RDP_USER"
           Write-Host "Password     : $env:RDP_PASS"
           Write-Host "=========================`n"
+
+          # Ambil secret dari GitHub
+          $botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          $chatId = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          
+          if ($botToken -ne "" -and $chatId -ne "") {
+              Write-Host "Mengirim kredensial ke Telegram..."
+              
+              # Kita pakai plain text agar karakter aneh di password tidak error saat di-parse Markdown
+              $pesan = "🖥️ RDP EXIT NODE SIAP! 🖥️`n`nIP Tailscale : $env:TAILSCALE_IP`nUsername     : $env:RDP_USER`nPassword     : $env:RDP_PASS"
+              
+              $payload = @{
+                  chat_id = $chatId
+                  text = $pesan
+              } | ConvertTo-Json
+              
+              try {
+                  Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload
+                  Write-Host "Berhasil terkirim ke Telegram!"
+              } catch {
+                  Write-Host "Gagal mengirim ke Telegram. Cek kembali Token dan Chat ID."
+              }
+          } else {
+              Write-Host "Telegram Token/Chat ID belum diset di Secrets, melewati pengiriman Telegram."
+          }
+
 
       - name: Keep Alive
         run: |
