@@ -93,6 +93,7 @@ jobs:
               @{command="screenshot"; description="Intip layar RDP secara Live"},
               @{command="setup"; description="Instalasi GUI Apps & WSL"},
               @{command="cmd"; description="Remote CMD (Ketik manual via chat)"},
+              @{command="ps"; description="Remote PowerShell (Ketik manual via chat)"},
               @{command="wsl"; description="Remote Ubuntu (Ketik manual via chat)"},
               @{command="expose"; description="Buka tunnel port (Ketik manual via chat)"}
           )
@@ -118,7 +119,7 @@ jobs:
 
                       switch -Regex ($text) {
                           "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek CPU, RAM & Uptime`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /cmd [cmd] : Remote Windows Console`n- /wsl [cmd] : Remote Ubuntu Terminal"
+                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek CPU, RAM & Uptime`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
                           }
                           "^/ip" { Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" }
                           "^/status" { 
@@ -189,6 +190,15 @@ jobs:
                               } else {
                                   $out = (cmd.exe /c "$cmd 2>&1" | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[CMD] <b>Output:</b>`n<pre>$out</pre>"
+                              }
+                          }
+                          "^/ps (.+)" { 
+                              $cmd = $matches[1]
+                              if ($cmd -match '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet)\b') {
+                                  Send-Msg "[!] <b>Command Disabled:</b>`nAplikasi interaktif (seperti $cmd) tidak diizinkan karena dapat memicu deadlock pada bot."
+                              } else {
+                                  $out = (powershell.exe -Command "$cmd" 2>&1 | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
+                                  Send-Msg "[PS] <b>Output:</b>`n<pre>$out</pre>"
                               }
                           }
                           "^/wsl (.+)" { 
