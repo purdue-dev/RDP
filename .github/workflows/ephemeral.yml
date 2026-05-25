@@ -79,7 +79,6 @@ jobs:
               } catch { Write-Host "Error SendMsg: $_" }
           }
 
-          # --- INJEKSI NATIVE BOT COMMAND MENU ---
           Write-Host "Membangun Native Command Menu Telegram..."
           $menuCommands = @(
               @{command="help"; description="📖 Tampilkan panduan command"},
@@ -87,7 +86,7 @@ jobs:
               @{command="ip"; description="🔑 Intip IP & Password RDP"},
               @{command="speedtest"; description="⚡ Uji kecepatan internet"},
               @{command="screenshot"; description="📸 Intip layar RDP secara Live"},
-              @{command="setup"; description="🚀 Instalasi GUI Apps & WSL"},
+              @{command="setup"; description="🚀 Tweak UI, Install GUI Apps & WSL"},
               @{command="cmd"; description="💻 Remote CMD (Ketik manual via chat)"},
               @{command="wsl"; description="🐧 Remote Ubuntu (Ketik manual via chat)"},
               @{command="expose"; description="🌐 Buka tunnel port (Ketik manual via chat)"}
@@ -96,7 +95,6 @@ jobs:
               $menuPayload = @{ commands = $menuCommands } | ConvertTo-Json -Depth 3
               Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -Method Post -ContentType "application/json" -Body $menuPayload | Out-Null
           } catch { Write-Host "Error Set Menu: $_" }
-          # ---------------------------------------
 
           $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
           Send-Msg $initMsg
@@ -115,7 +113,7 @@ jobs:
 
                       switch -Regex ($text) {
                           "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek beban CPU & Sisa RAM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps & WSL (Background)`n- /cmd [cmd] : Remote Windows Console`n- /wsl [cmd] : Remote Ubuntu Terminal"
+                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek beban CPU & Sisa RAM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /cmd [cmd] : Remote Windows Console`n- /wsl [cmd] : Remote Ubuntu Terminal"
                           }
                           "^/ip" { Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" }
                           "^/status" { 
@@ -133,9 +131,32 @@ jobs:
                               if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
                                   Send-Msg "[V] GUI Apps & WSL tampaknya sudah aktif."
                               } else {
-                                  Send-Msg "[SYS] <b>Menginstal Workstation Suite di background...</b>`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04`n- OpenSSH DualCore`n`nProses memakan waktu 3-5 menit, bot tetap merespons perintah lain."
+                                  Send-Msg "[SYS] <b>Mengeksekusi Workstation Suite...</b>`n- Tweak UI & 4K Dark Wallpaper`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04 & SSH`n`nBerjalan di background (3-5 menit)."
                                   Start-Job -ScriptBlock {
+                                      # TWEAK UI DARK MODE & WALLPAPER
+                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
+                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
+                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 1
+                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "ColorPrevalence" -Value 0
+                                      
+                                      $url = "https://4kwallpapers.com/images/wallpapers/windows-11-dark-mode-abstract-background-black-background-7680x4320-8710.png"
+                                      $img = "$env:TEMP\wallpaper.png"
+                                      try {
+                                          Invoke-WebRequest -Uri $url -OutFile $img -UseBasicParsing -TimeoutSec 15
+                                          Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class WP { [DllImport(`"user32.dll`", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int uA, int uP, string lpv, int fu); public static void Set(string p) { SystemParametersInfo(20, 0, p, 3); } }"
+                                          [WP]::Set($img)
+                                      } catch {
+                                          Set-ItemProperty -Path "HKCU:\Control Panel\Colors" -Name "Background" -Value "0 0 0"
+                                          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "WallPaper" -Value ""
+                                      }
+                                      Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+                                      Start-Sleep -Seconds 2
+                                      Start-Process explorer.exe -ErrorAction SilentlyContinue
+                                      
+                                      # INSTALASI GUI APPS
                                       choco install brave vscode -y
+                                      
+                                      # INSTALASI WSL
                                       wsl --install -d Ubuntu-22.04 --no-launch
                                       Start-Sleep 15
                                       wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash rdp && echo 'rdp:root' | chpasswd && usermod -aG sudo rdp"
