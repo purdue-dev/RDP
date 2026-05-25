@@ -72,7 +72,6 @@ jobs:
           $ipInfo = "___IP___"
           $passInfo = "___PASS___"
           
-          # Master Regex Blacklist: Blokir GUI, TUI, dan REPL interaktif
           $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup|ping\s+-t)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
           function Send-Msg ($msg) {
@@ -90,7 +89,7 @@ jobs:
           Write-Host "Membangun Native Command Menu Telegram..."
           $menuCommands = @(
               @{command="help"; description="Tampilkan panduan command"},
-              @{command="status"; description="Cek beban CPU, RAM & Waktu VM"},
+              @{command="status"; description="Cek beban CPU, RAM, Procie & Waktu VM"},
               @{command="ip"; description="Intip IP & Password RDP"},
               @{command="speedtest"; description="Uji kecepatan internet"},
               @{command="screenshot"; description="Intip layar RDP secara Live"},
@@ -106,7 +105,7 @@ jobs:
               Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -Method Post -ContentType "application/json" -Body $menuPayload | Out-Null
           } catch { Write-Host "Error Set Menu: $_" }
 
-          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
+          $initMsg = "[SYS] <b>AZURE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
           Send-Msg $initMsg
 
           $offset = 0
@@ -123,13 +122,15 @@ jobs:
 
                       switch -Regex ($text) {
                           "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
+                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
                           }
                           "^/ip" { Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" }
                           "^/status" { 
-                              $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
-                              $os = Get-CimInstance Win32_OperatingSystem
+                              $procInstance = Get-CimInstance Win32_Processor
+                              $cpuName = ($procInstance | Select-Object -First 1).Name.Trim()
+                              $cpuLoad = ($procInstance | Measure-Object -Property LoadPercentage -Average).Average
                               
+                              $os = Get-CimInstance Win32_OperatingSystem
                               $totalRam = [math]::Round($os.TotalVisibleMemorySize / 1024 / 1024, 2)
                               $freeRam = [math]::Round($os.FreePhysicalMemory / 1024 / 1024, 2)
                               $usedRam = $totalRam - $freeRam
@@ -142,7 +143,7 @@ jobs:
                               $remTimeSpan = [timespan]::fromminutes($remMins)
                               $remStr = "$($remTimeSpan.Hours) Jam, $($remTimeSpan.Minutes) Menit"
                               
-                              Send-Msg "[STATS] <b>SYSTEM HEALTH</b>`n- CPU: $cpu%`n- RAM: $usedRam GB / $totalRam GB`n- Free: $freeRam GB`n- Uptime: $upStr`n- Sisa VM: $remStr"
+                              Send-Msg "[STATS] <b>SYSTEM HEALTH</b>`n- CPU Model: <code>$cpuName</code>`n- CPU Load: $cpuLoad%`n- RAM: $usedRam GB / $totalRam GB`n- Free: $freeRam GB`n- Uptime: $upStr`n- Sisa VM: $remStr"
                           }
                           "^/speedtest" {
                               Send-Msg "[NET] Menjalankan Speedtest Ookla (15 detik)..."
@@ -241,7 +242,7 @@ jobs:
                           }
                           "^/expose (\d+)" {
                               $port = $matches[1]
-                              Send-Msg "[NET] Membuka terowongan Cloudflare untuk Port $port..."
+                              Send-Msg "[NET] Membuka Cloudflare tunnel untuk Port $port..."
                               Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:$port > C:\cf-$port.log 2>&1" -WindowStyle Hidden
                               Start-Sleep 5
                               $cfLog = Get-Content "C:\cf-$port.log" -Raw
