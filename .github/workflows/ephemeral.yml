@@ -71,6 +71,9 @@ jobs:
           $allowedId = "___CHAT_ID___"
           $ipInfo = "___IP___"
           $passInfo = "___PASS___"
+          
+          # Master Regex Blacklist: Blokir GUI, TUI, dan REPL interaktif
+          $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup|ping\s+-t)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
           function Send-Msg ($msg) {
               try {
@@ -87,11 +90,12 @@ jobs:
           Write-Host "Membangun Native Command Menu Telegram..."
           $menuCommands = @(
               @{command="help"; description="Tampilkan panduan command"},
-              @{command="status"; description="Cek beban CPU, RAM & Uptime"},
+              @{command="status"; description="Cek beban CPU, RAM & Waktu VM"},
               @{command="ip"; description="Intip IP & Password RDP"},
               @{command="speedtest"; description="Uji kecepatan internet"},
               @{command="screenshot"; description="Intip layar RDP secara Live"},
               @{command="setup"; description="Instalasi GUI Apps & WSL"},
+              @{command="bridgewsl"; description="Bridge port WSL ke public IP"},
               @{command="cmd"; description="Remote CMD (Ketik manual via chat)"},
               @{command="ps"; description="Remote PowerShell (Ketik manual via chat)"},
               @{command="wsl"; description="Remote Ubuntu (Ketik manual via chat)"},
@@ -119,16 +123,26 @@ jobs:
 
                       switch -Regex ($text) {
                           "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek CPU, RAM & Uptime`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
+                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
                           }
                           "^/ip" { Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" }
                           "^/status" { 
                               $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
                               $os = Get-CimInstance Win32_OperatingSystem
-                              $ram = [math]::Round($os.FreePhysicalMemory / 1024 / 1024, 2)
+                              
+                              $totalRam = [math]::Round($os.TotalVisibleMemorySize / 1024 / 1024, 2)
+                              $freeRam = [math]::Round($os.FreePhysicalMemory / 1024 / 1024, 2)
+                              $usedRam = $totalRam - $freeRam
+                              
                               $up = (Get-Date) - $os.LastBootUpTime
                               $upStr = "$($up.Hours) Jam, $($up.Minutes) Menit"
-                              Send-Msg "[STATS] <b>HEALTH CHECK</b>`n- CPU Load: $cpu%`n- Available RAM: $ram GB`n- Uptime: $upStr"
+                              
+                              $remMins = 360 - $up.TotalMinutes
+                              if ($remMins -lt 0) { $remMins = 0 }
+                              $remTimeSpan = [timespan]::fromminutes($remMins)
+                              $remStr = "$($remTimeSpan.Hours) Jam, $($remTimeSpan.Minutes) Menit"
+                              
+                              Send-Msg "[STATS] <b>SYSTEM HEALTH</b>`n- CPU: $cpu%`n- RAM: $usedRam GB / $totalRam GB`n- Free: $freeRam GB`n- Uptime: $upStr`n- Sisa VM: $remStr"
                           }
                           "^/speedtest" {
                               Send-Msg "[NET] Menjalankan Speedtest Ookla (15 detik)..."
@@ -183,10 +197,22 @@ jobs:
                                   } | Out-Null
                               }
                           }
+                          "^/bridgewsl (\d+)" {
+                              $port = $matches[1]
+                              $wslCheck = wsl.exe -l -q 2>$null
+                              if ([string]::IsNullOrWhiteSpace($wslCheck)) {
+                                  Send-Msg "[X] <b>WSL belum terinstal!</b>"
+                              } else {
+                                  $wslIP = ((wsl -d Ubuntu-22.04 -u root bash -c "hostname -I") -split '\s+')[0].Trim()
+                                  netsh interface portproxy add v4tov4 listenport=$port listenaddress=0.0.0.0 connectport=$port connectaddress=$wslIP
+                                  netsh advfirewall firewall add rule name="WSL-Bridge-$port" dir=in action=allow protocol=TCP localport=$port
+                                  Send-Msg "[NET] <b>WSL Port $port Bridged!</b>`nBuka browser HP-mu ke: <code>http://$ipInfo`:$port</code>"
+                              }
+                          }
                           "^/cmd (.+)" { 
                               $cmd = $matches[1]
-                              if ($cmd -match '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet)\b') {
-                                  Send-Msg "[!] <b>Command Disabled:</b>`nAplikasi interaktif (seperti $cmd) tidak diizinkan karena dapat memicu deadlock pada bot."
+                              if ($cmd -match $blacklist) {
+                                  Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
                               } else {
                                   $out = (cmd.exe /c "$cmd 2>&1" | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[CMD] <b>Output:</b>`n<pre>$out</pre>"
@@ -194,8 +220,8 @@ jobs:
                           }
                           "^/ps (.+)" { 
                               $cmd = $matches[1]
-                              if ($cmd -match '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet)\b') {
-                                  Send-Msg "[!] <b>Command Disabled:</b>`nAplikasi interaktif (seperti $cmd) tidak diizinkan karena dapat memicu deadlock pada bot."
+                              if ($cmd -match $blacklist) {
+                                  Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
                               } else {
                                   $out = (powershell.exe -Command "$cmd" 2>&1 | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[PS] <b>Output:</b>`n<pre>$out</pre>"
@@ -206,8 +232,8 @@ jobs:
                               $wslCheck = wsl.exe -l -q 2>$null
                               if ([string]::IsNullOrWhiteSpace($wslCheck)) {
                                   Send-Msg "[X] <b>WSL belum terinstal!</b>`nTekan tombol atau ketik <code>/setup</code> terlebih dahulu."
-                              } elseif ($cmd -match '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet)\b') {
-                                  Send-Msg "[!] <b>Command Disabled:</b>`nAplikasi interaktif (seperti $cmd) tidak diizinkan karena dapat memicu deadlock pada bot."
+                              } elseif ($cmd -match $blacklist) {
+                                  Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
                               } else {
                                   $out = (wsl -d Ubuntu-22.04 -u root bash -c "$cmd 2>&1" | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[WSL] <b>Output:</b>`n<pre>$out</pre>"
