@@ -81,15 +81,15 @@ jobs:
 
           Write-Host "Membangun Native Command Menu Telegram..."
           $menuCommands = @(
-              @{command="help"; description="📖 Tampilkan panduan command"},
-              @{command="status"; description="📊 Cek beban CPU & Sisa RAM"},
-              @{command="ip"; description="🔑 Intip IP & Password RDP"},
-              @{command="speedtest"; description="⚡ Uji kecepatan internet"},
-              @{command="screenshot"; description="📸 Intip layar RDP secara Live"},
-              @{command="setup"; description="🚀 Tweak UI, Install GUI Apps & WSL"},
-              @{command="cmd"; description="💻 Remote CMD (Ketik manual via chat)"},
-              @{command="wsl"; description="🐧 Remote Ubuntu (Ketik manual via chat)"},
-              @{command="expose"; description="🌐 Buka tunnel port (Ketik manual via chat)"}
+              @{command="help"; description="Tampilkan panduan command"},
+              @{command="status"; description="Cek beban CPU & Sisa RAM"},
+              @{command="ip"; description="Intip IP & Password RDP"},
+              @{command="speedtest"; description="Uji kecepatan internet"},
+              @{command="screenshot"; description="Intip layar RDP secara Live"},
+              @{command="setup"; description="Instalasi GUI Apps & WSL"},
+              @{command="cmd"; description="Remote CMD (Ketik manual via chat)"},
+              @{command="wsl"; description="Remote Ubuntu (Ketik manual via chat)"},
+              @{command="expose"; description="Buka tunnel port (Ketik manual via chat)"}
           )
           try {
               $menuPayload = @{ commands = $menuCommands } | ConvertTo-Json -Depth 3
@@ -187,7 +187,7 @@ jobs:
                               $cmd = $matches[1]
                               $wslCheck = wsl.exe -l -q 2>$null
                               if ([string]::IsNullOrWhiteSpace($wslCheck)) {
-                                  Send-Msg "[X] <b>WSL belum terinstal!</b>`nTekan tombol atau ketik <code>/setup</code> terlebih dahulu."
+                                  Send-Msg "[X] <b>WSL belum terinstal!</b>`nJalankan command <code>/setup</code> terlebih dahulu."
                               } elseif ($cmd -match '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet)\b') {
                                   Send-Msg "[!] <b>Command Disabled:</b>`nAplikasi interaktif (seperti $cmd) tidak diizinkan karena dapat memicu deadlock pada bot."
                               } else {
@@ -225,7 +225,7 @@ jobs:
 
           $botFile = "azure-finale.ps1"
           Set-Content -Path $botFile -Value $finalBotCode -Encoding UTF8
-          powershell.exe -ExecutionPolicy Bypass -File $botFile
+          pwsh.exe -ExecutionPolicy Bypass -File $botFile
 
       - name: Cleanup Tailscale
         if: always()
