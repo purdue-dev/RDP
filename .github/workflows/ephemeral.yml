@@ -74,7 +74,6 @@ jobs:
 
           function Send-Msg ($msg) {
               try {
-                  # Menghapus grid keyboard lama dan hanya menyisakan Native Menu
                   $payload = @{ 
                       chat_id = $allowedId; 
                       text = $msg; 
@@ -88,7 +87,7 @@ jobs:
           Write-Host "Membangun Native Command Menu Telegram..."
           $menuCommands = @(
               @{command="help"; description="Tampilkan panduan command"},
-              @{command="status"; description="Cek beban CPU & Sisa RAM"},
+              @{command="status"; description="Cek beban CPU, RAM & Uptime"},
               @{command="ip"; description="Intip IP & Password RDP"},
               @{command="speedtest"; description="Uji kecepatan internet"},
               @{command="screenshot"; description="Intip layar RDP secara Live"},
@@ -119,13 +118,16 @@ jobs:
 
                       switch -Regex ($text) {
                           "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek beban CPU & Sisa RAM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /cmd [cmd] : Remote Windows Console`n- /wsl [cmd] : Remote Ubuntu Terminal"
+                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek CPU, RAM & Uptime`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /cmd [cmd] : Remote Windows Console`n- /wsl [cmd] : Remote Ubuntu Terminal"
                           }
                           "^/ip" { Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" }
                           "^/status" { 
-                              $cpu = (Get-WmiObject win32_processor | Measure-Object -Property LoadPercentage -Average).Average
-                              $ram = [math]::Round((Get-WmiObject win32_operatingsystem).FreePhysicalMemory / 1024 / 1024, 2)
-                              Send-Msg "[STATS] <b>HEALTH CHECK</b>`n- CPU Load: $cpu%`n- Available RAM: $ram GB"
+                              $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+                              $os = Get-CimInstance Win32_OperatingSystem
+                              $ram = [math]::Round($os.FreePhysicalMemory / 1024 / 1024, 2)
+                              $up = (Get-Date) - $os.LastBootUpTime
+                              $upStr = "$($up.Hours) Jam, $($up.Minutes) Menit"
+                              Send-Msg "[STATS] <b>HEALTH CHECK</b>`n- CPU Load: $cpu%`n- Available RAM: $ram GB`n- Uptime: $upStr"
                           }
                           "^/speedtest" {
                               Send-Msg "[NET] Menjalankan Speedtest Ookla (15 detik)..."
