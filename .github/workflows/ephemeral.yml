@@ -74,7 +74,13 @@ jobs:
 
           function Send-Msg ($msg) {
               try {
-                  $payload = @{ chat_id = $allowedId; text = $msg; parse_mode = "HTML" } | ConvertTo-Json -Depth 3
+                  # Menghapus grid keyboard lama dan hanya menyisakan Native Menu
+                  $payload = @{ 
+                      chat_id = $allowedId; 
+                      text = $msg; 
+                      parse_mode = "HTML"; 
+                      reply_markup = @{ remove_keyboard = $true } 
+                  } | ConvertTo-Json -Depth 3
                   Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload | Out-Null
               } catch { Write-Host "Error SendMsg: $_" }
           }
@@ -187,7 +193,7 @@ jobs:
                               $cmd = $matches[1]
                               $wslCheck = wsl.exe -l -q 2>$null
                               if ([string]::IsNullOrWhiteSpace($wslCheck)) {
-                                  Send-Msg "[X] <b>WSL belum terinstal!</b>`nJalankan command <code>/setup</code> terlebih dahulu."
+                                  Send-Msg "[X] <b>WSL belum terinstal!</b>`nTekan tombol atau ketik <code>/setup</code> terlebih dahulu."
                               } elseif ($cmd -match '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet)\b') {
                                   Send-Msg "[!] <b>Command Disabled:</b>`nAplikasi interaktif (seperti $cmd) tidak diizinkan karena dapat memicu deadlock pada bot."
                               } else {
