@@ -72,7 +72,8 @@ jobs:
           $ipInfo = "___IP___"
           $passInfo = "___PASS___"
           
-          $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup|ping\s+-t)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
+          # Master Regex Blacklist tetap dipasang sebagai filter baris pertama sebelum masuk engine timeout
+          $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
           function Send-Msg ($msg) {
               try {
@@ -86,6 +87,44 @@ jobs:
               } catch { Write-Host "Error SendMsg: $_" }
           }
 
+          # Fungsi eksekusi pinter dengan hard-timeout 15 detik untuk menangkal segala jenis freeze/stuck
+          function Execute-WithTimeout ($exe, $argsList) {
+              $pInfo = New-Object System.Diagnostics.ProcessStartInfo
+              $pInfo.FileName = $exe
+              $pInfo.Arguments = $argsList
+              $pInfo.RedirectStandardOutput = $true
+              $pInfo.RedirectStandardError = $true
+              $pInfo.UseShellExecute = $false
+              $pInfo.CreateNoWindow = $true
+
+              $proc = New-Object System.Diagnostics.Process
+              $proc.StartInfo = $pInfo
+              
+              $stdout = New-Object System.Text.StringBuilder
+              $stderr = New-Object System.Text.StringBuilder
+
+              try {
+                  $proc.Start() | Out-Null
+                  
+                  # Membaca stream secara asinkron agar tidak memblokir pembacaan timeout
+                  $stdoutScript = { while (-not $proc.StandardOutput.EndOfStream) { $stdout.AppendLine($proc.StandardOutput.ReadLine()) | Out-Null } }
+                  $stderrScript = { while (-not $proc.StandardError.EndOfStream) { $stderr.AppendLine($proc.StandardError.ReadLine()) | Out-Null } }
+                  
+                  # Batas waktu aman: 15000 milidetik (15 detik)
+                  $hasExited = $proc.WaitForExit(15000)
+                  
+                  if (-not $hasExited) {
+                      $proc.Kill()
+                      return "[TIMEOUT - 15s Limit Exceeded]`nProcess terpaksa dimatikan oleh Bot System.`n`nPartial Output:`n" + $proc.StandardOutput.ReadToEnd()
+                  }
+                  
+                  $outText = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
+                  return $outText
+              } catch {
+                  return "Execution Error: $_"
+              }
+          }
+
           Write-Host "Membangun Native Command Menu Telegram..."
           $menuCommands = @(
               @{command="help"; description="Tampilkan panduan command"},
@@ -95,6 +134,8 @@ jobs:
               @{command="screenshot"; description="Intip layar RDP secara Live"},
               @{command="setup"; description="Instalasi GUI Apps & WSL"},
               @{command="bridgewsl"; description="Bridge port WSL ke public IP"},
+              @{command="fetch"; description="Download file dari RDP ke HP"},
+              @{command="kill"; description="Algojo pembunuh proses Windows/WSL"},
               @{command="cmd"; description="Remote CMD (Ketik manual via chat)"},
               @{command="ps"; description="Remote PowerShell (Ketik manual via chat)"},
               @{command="wsl"; description="Remote Ubuntu (Ketik manual via chat)"},
@@ -105,7 +146,7 @@ jobs:
               Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -Method Post -ContentType "application/json" -Body $menuPayload | Out-Null
           } catch { Write-Host "Error Set Menu: $_" }
 
-          $initMsg = "[SYS] <b>AZURE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
+          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
           Send-Msg $initMsg
 
           $offset = 0
@@ -115,14 +156,35 @@ jobs:
                   foreach ($update in $updates.result) {
                       $offset = $update.update_id + 1
                       $senderId = $update.message.from.id.ToString()
-                      $text = $update.message.text
-
+                      
                       if ($senderId -ne $allowedId) { continue }
+
+                      # --- FITUR DETEKSI AUTO UPLOAD FILE ---
+                      if ($update.message.document -ne $null) {
+                          $doc = $update.message.document
+                          $fName = $doc.file_name
+                          $fId = $doc.file_id
+                          Send-Msg "[SYS] Mendeteksi file masuk: <code>$fName</code>. Mengunduh ke Desktop RDP..."
+                          
+                          try {
+                              $fInfo = Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/getFile?file_id=$fId"
+                              $fPath = $fInfo.result.file_path
+                              $dUrl = "https://api.telegram.org/file/bot$botToken/$fPath"
+                              $targetPath = "C:\Users\runneradmin\Desktop\$fName"
+                              
+                              Invoke-WebRequest -Uri $dUrl -OutFile $targetPath -UseBasicParsing
+                              Send-Msg "[V] <b>Upload Sukses!</b>`nFile mendarat di: <code>$targetPath</code>"
+                          } catch { Send-Msg "[X] Gagal mendownload file: $_" }
+                          continue
+                      }
+                      # --------------------------------------
+
+                      $text = $update.message.text
                       if ([string]::IsNullOrWhiteSpace($text)) { continue }
 
                       switch -Regex ($text) {
                           "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
+                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
                           }
                           "^/ip" { Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" }
                           "^/status" { 
@@ -157,7 +219,6 @@ jobs:
                               } else {
                                   Send-Msg "[SYS] <b>Mengeksekusi Workstation Suite...</b>`n- Tweak UI & 4K Dark Wallpaper`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04 & SSH`n`nBerjalan di background (3-5 menit)."
                                   Start-Job -ScriptBlock {
-                                      # TWEAK UI DARK MODE & WALLPAPER
                                       Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
                                       Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
                                       Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 1
@@ -177,10 +238,8 @@ jobs:
                                       Start-Sleep -Seconds 2
                                       Start-Process explorer.exe -ErrorAction SilentlyContinue
                                       
-                                      # INSTALASI GUI APPS
                                       choco install brave vscode -y
                                       
-                                      # INSTALASI WSL
                                       wsl --install -d Ubuntu-22.04 --no-launch
                                       Start-Sleep 15
                                       wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash rdp && echo 'rdp:root' | chpasswd && usermod -aG sudo rdp"
@@ -210,12 +269,34 @@ jobs:
                                   Send-Msg "[NET] <b>WSL Port $port Bridged!</b>`nBuka browser HP-mu ke: <code>http://$ipInfo`:$port</code>"
                               }
                           }
+                          "^/fetch (.+)" {
+                              $fPath = $matches[1].Trim()
+                              if (Test-Path $fPath) {
+                                  Send-Msg "[SYS] Mengirimkan berkas <code>$fPath</code> ke Telegram..."
+                                  curl.exe -s -F "chat_id=$allowedId" -F "document=@$fPath" "https://api.telegram.org/bot$botToken/sendDocument" | Out-Null
+                              } else { Send-Msg "[X] File tidak ditemukan di path: <code>$fPath</code>" }
+                          }
+                          "^/kill (.+)" {
+                              $pName = $matches[1].Trim()
+                              Send-Msg "[💀] Menjalankan operasi algojo untuk memburu proses: <code>$pName</code>..."
+                              
+                              # Bantai di Windows
+                              $winOut = (taskkill.exe /F /IM "${pName}.exe" /T 2>&1 | Out-String).Trim()
+                              # Bantai di Linux WSL
+                              $linuxOut = ""
+                              $wslCheck = wsl.exe -l -q 2>$null
+                              if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
+                                  $linuxOut = (wsl.exe -d Ubuntu-22.04 -u root bash -c "pkill -9 -f $pName" 2>&1 | Out-String).Trim()
+                              }
+                              Send-Msg "[💀] <b>Hasil Eksekusi:</b>`nWindows: <pre>$winOut</pre>`nWSL: <pre>$linuxOut</pre>"
+                          }
                           "^/cmd (.+)" { 
                               $cmd = $matches[1]
                               if ($cmd -match $blacklist) {
                                   Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
                               } else {
-                                  $out = (cmd.exe /c "$cmd 2>&1" | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
+                                  $rawOut = Execute-WithTimeout "cmd.exe" "/c `"$cmd 2>&1`""
+                                  $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[CMD] <b>Output:</b>`n<pre>$out</pre>"
                               }
                           }
@@ -224,7 +305,8 @@ jobs:
                               if ($cmd -match $blacklist) {
                                   Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
                               } else {
-                                  $out = (powershell.exe -Command "$cmd" 2>&1 | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
+                                  $rawOut = Execute-WithTimeout "powershell.exe" "-Command `"$cmd`""
+                                  $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[PS] <b>Output:</b>`n<pre>$out</pre>"
                               }
                           }
@@ -236,13 +318,14 @@ jobs:
                               } elseif ($cmd -match $blacklist) {
                                   Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
                               } else {
-                                  $out = (wsl -d Ubuntu-22.04 -u root bash -c "$cmd 2>&1" | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
+                                  $rawOut = Execute-WithTimeout "wsl.exe" "-d Ubuntu-22.04 -u root bash -c `"$cmd 2>&1`""
+                                  $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[WSL] <b>Output:</b>`n<pre>$out</pre>"
                               }
                           }
                           "^/expose (\d+)" {
                               $port = $matches[1]
-                              Send-Msg "[NET] Membuka Cloudflare tunnel untuk Port $port..."
+                              Send-Msg "[NET] Membuka terowongan Cloudflare untuk Port $port..."
                               Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:$port > C:\cf-$port.log 2>&1" -WindowStyle Hidden
                               Start-Sleep 5
                               $cfLog = Get-Content "C:\cf-$port.log" -Raw
@@ -280,4 +363,3 @@ jobs:
               Write-Host "Membersihkan exit node..."
               & $ts logout
           }
-          
