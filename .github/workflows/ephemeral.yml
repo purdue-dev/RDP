@@ -62,9 +62,9 @@ jobs:
           $tsIP = & $ts ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: RUN COMMAND CENTER (Bot Engine)
+      - name: Build Bot Engine (Part 1 - Core & Web TTYD)
         run: |
-          $botScriptCode = @'
+          $code = @'
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
           $botToken = "___BOT_TOKEN___"
@@ -128,7 +128,7 @@ jobs:
               @{command="ip"; description="Intip IP & Password RDP"},
               @{command="speedtest"; description="Uji kecepatan internet"},
               @{command="screenshot"; description="Intip layar RDP secara Live"},
-              @{command="setup"; description="Instalasi GUI Apps & WSL"},
+              @{command="setup"; description="Instalasi GUI Apps, WSL & WebRDP"},
               @{command="bridgewsl"; description="Bridge port WSL ke public IP"},
               @{command="fetch"; description="Download file dari RDP ke HP"},
               @{command="kill"; description="Algojo pembunuh proses Windows/WSL"},
@@ -157,7 +157,12 @@ jobs:
 
           $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nTTYD Terminal: <code>$ttydUrl</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
           Send-Msg $initMsg
+          '@
+          Set-Content -Path "C:\bot-part1.txt" -Value $code -Encoding UTF8
 
+      - name: Build Bot Engine (Part 2 - Main Loop & Setup Suite)
+        run: |
+          $code = @'
           $offset = 0
           while ($true) {
               try {
@@ -383,6 +388,13 @@ jobs:
               } catch { Start-Sleep -Seconds 5 }
           }
           '@
+          Set-Content -Path "C:\bot-part2.txt" -Value $code -Encoding UTF8
+
+      - name: Execute Bot Engine (Final Compilation)
+        run: |
+          $p1 = Get-Content "C:\bot-part1.txt" -Raw
+          $p2 = Get-Content "C:\bot-part2.txt" -Raw
+          $botScriptCode = $p1 + "`n" + $p2
 
           $finalBotCode = $botScriptCode -replace "___BOT_TOKEN___", "${{ secrets.TELEGRAM_BOT_TOKEN }}" `
                                          -replace "___CHAT_ID___", "${{ secrets.TELEGRAM_CHAT_ID }}" `
