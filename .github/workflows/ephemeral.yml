@@ -3,11 +3,7 @@ name: RDP-v3.5-AzureFinale
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *' 
-
-concurrency:
-  group: tailscale-exit-node
-  cancel-in-progress: true
+    - cron: '0 */5 * * *'
 
 jobs:
   secure-rdp:
@@ -15,7 +11,6 @@ jobs:
     timeout-minutes: 360
 
     steps:
-
       - name: Enable RDP & OpenSSH Server
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
@@ -38,7 +33,7 @@ jobs:
           echo "RDP_USER=runneradmin" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install Network Core (Tailscale, Speedtest, Cloudflared, Nmap)
+      - name: Install Network Core (Tailscale, Speedtest, Cloudflared)
         run: |
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
 
@@ -46,7 +41,7 @@ jobs:
           $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
           $installProcess.WaitForExit()
           
-          choco install speedtest cloudflared nmap -y
+          choco install speedtest cloudflared -y
 
           $paths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe")
           $ts = ""
@@ -71,6 +66,7 @@ jobs:
           $allowedId = "___CHAT_ID___"
           $ipInfo = "___IP___"
           $passInfo = "___PASS___"
+          $geminiKey = "___GEMINI_KEY___"
           
           $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
@@ -117,9 +113,8 @@ jobs:
               }
           }
 
-          Write-Host "Membangun Native Command Menu Telegram..."
           $menuCommands = @(
-              @{command="help"; description="Tampilkan panduan command"},
+              @{command="help"; description="Tampilkan panduan command & instruksi AI"},
               @{command="status"; description="Cek beban CPU, RAM, Procie & Waktu VM"},
               @{command="ip"; description="Intip IP, Password & Akses Guacamole"},
               @{command="speedtest"; description="Uji kecepatan internet"},
@@ -139,7 +134,7 @@ jobs:
               Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -Method Post -ContentType "application/json" -Body $menuPayload | Out-Null
           } catch { Write-Host "Error Set Menu: $_" }
 
-          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nGuacamole: <code>Belum di-setup (Ketik /setup)</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
+          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nGuacamole: <code>Belum di-setup (Ketik /setup)</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi. Kamu juga bisa chat langsung dengan saya tanpa simbol / untuk berinteraksi!"
           Send-Msg $initMsg
           '@
           Set-Content -Path "C:\bot-part1.txt" -Value $code -Encoding UTF8
@@ -154,230 +149,257 @@ jobs:
                   foreach ($update in $updates.result) {
                       $offset = $update.update_id + 1
                       $senderId = $update.message.from.id.ToString()
-                      if ($senderId -ne $allowedId) { continue }
-
-                      if ($update.message.document -ne $null) {
-                          $doc = $update.message.document
-                          $fName = $doc.file_name
-                          $fId = $doc.file_id
-                          Send-Msg "[SYS] Mendeteksi file masuk: <code>$fName</code>. Mengunduh ke Desktop RDP..."
-                          try {
-                              $fInfo = Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/getFile?file_id=$fId"
-                              $fPath = $fInfo.result.file_path
-                              $dUrl = "https://api.telegram.org/file/bot$botToken/$fPath"
-                              $targetPath = "C:\Users\runneradmin\Desktop\$fName"
-                              Invoke-WebRequest -Uri $dUrl -OutFile $targetPath -UseBasicParsing
-                              Send-Msg "[V] <b>Upload Sukses!</b>`nFile mendarat di: <code>$targetPath</code>"
-                          } catch { Send-Msg "[X] Gagal mendownload file: $_" }
-                          continue
-                      }
 
                       $text = $update.message.text
                       if ([string]::IsNullOrWhiteSpace($text)) { continue }
 
-                      switch -Regex ($text) {
-                          "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare"
+                      if ($text.StartsWith("/")) {
+                          if ($senderId -ne $allowedId) {
+                              try {
+                                  $pld = @{ chat_id = $senderId; text = "[!] <b>Access Denied:</b> Kamu tidak memiliki izin mengeksekusi sistem ini."; parse_mode = "HTML" } | ConvertTo-Json
+                                  Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
+                              } catch {}
+                              continue
                           }
-                          "^/ip" { 
-                              $guacLink = "Belum di-setup (Ketik /setup)"
-                              if (Test-Path "C:\guac-url.txt") { $guacLink = Get-Content "C:\guac-url.txt" }
-                              Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nGuacamole: <code>$guacLink</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" 
+
+                          if ($update.message.document -ne $null) {
+                              $doc = $update.message.document
+                              $fName = $doc.file_name
+                              $fId = $doc.file_id
+                              Send-Msg "[SYS] Mendeteksi file masuk: <code>$fName</code>. Mengunduh ke Desktop RDP..."
+                              try {
+                                  $fInfo = Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/getFile?file_id=$fId"
+                                  $fPath = $fInfo.result.file_path
+                                  $dUrl = "https://api.telegram.org/file/bot$botToken/$fPath"
+                                  $targetPath = "C:\Users\runneradmin\Desktop\$fName"
+                                  Invoke-WebRequest -Uri $dUrl -OutFile $targetPath -UseBasicParsing
+                                  Send-Msg "[V] <b>Upload Sukses!</b>`nFile mendarat di: <code>$targetPath</code>"
+                              } catch { Send-Msg "[X] Gagal mendownload file: $_" }
+                              continue
                           }
-                          "^/status" { 
-                              $procInstance = Get-CimInstance Win32_Processor
-                              $cpuName = ($procInstance | Select-Object -First 1).Name.Trim()
-                              $cpuLoad = ($procInstance | Measure-Object -Property LoadPercentage -Average).Average
-                              $os = Get-CimInstance Win32_OperatingSystem
-                              $totalRam = [math]::Round($os.TotalVisibleMemorySize / 1024 / 1024, 2)
-                              $freeRam = [math]::Round($os.FreePhysicalMemory / 1024 / 1024, 2)
-                              $usedRam = $totalRam - $freeRam
-                              $up = (Get-Date) - $os.LastBootUpTime
-                              $upStr = "$($up.Hours) Jam, $($up.Minutes) Menit"
-                              $remMins = 360 - $up.TotalMinutes
-                              if ($remMins -lt 0) { $remMins = 0 }
-                              $remTimeSpan = [timespan]::fromminutes($remMins)
-                              $remStr = "$($remTimeSpan.Hours) Jam, $($remTimeSpan.Minutes) Menit"
-                              Send-Msg "[STATS] <b>SYSTEM HEALTH</b>`n- CPU Model: <code>$cpuName</code>`n- CPU Load: $cpuLoad%`n- RAM: $usedRam GB / $totalRam GB`n- Free: $freeRam GB`n- Uptime: $upStr`n- Sisa VM: $remStr"
-                          }
-                          "^/speedtest" {
-                              Send-Msg "[NET] Menjalankan Speedtest Ookla (15 detik)..."
-                              $out = (speedtest.exe --accept-license --accept-gdpr 2>&1 | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
-                              Send-Msg "[NET] <b>Hasil Speedtest:</b>`n<pre>$out</pre>"
-                          }
-                          "^/scanhost" {
-                              Send-Msg "[NET] Mengeksekusi Nmap audit ke Windows Host Machine dari dalam WSL..."
-                              $rawOut = Execute-WithTimeout "wsl.exe" "-d Ubuntu-22.04 -u root bash -c `"nmap \$(ip route show default | awk '{print \$3}') 2>&1`""
-                              $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
-                              Send-Msg "[SCAN] <b>Hasil Scan Host:</b>`n<pre>$out</pre>"
-                          }
-                          "^/setup" {
-                              $wslCheck = wsl.exe -l -q 2>$null
-                              if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
-                                  Send-Msg "[V] GUI Apps & WSL tampaknya sudah aktif."
-                              } else {
-                                  Send-Msg "[SYS] <b>Mengeksekusi Workstation Suite...</b>`n- Tweak UI & 4K Dark Wallpaper`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04 & SSH Engine`n- Docker Engine & Apache Guacamole WebRDP`n`nBerjalan di background (3-5 menit)."
-                                  Start-Job -ScriptBlock {
-                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
-                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
-                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 1
-                                      Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "ColorPrevalence" -Value 0
-                                      
-                                      $url = "https://4kwallpapers.com/images/wallpapers/windows-11-dark-mode-abstract-background-black-background-7680x4320-8710.png"
-                                      $img = "$env:TEMP\wallpaper.png"
-                                      try {
-                                          Invoke-WebRequest -Uri $url -OutFile $img -UseBasicParsing -TimeoutSec 15
-                                          Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class WP { [DllImport(`"user32.dll`", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int uA, int uP, string lpv, int fu); public static void Set(string p) { SystemParametersInfo(20, 0, p, 3); } }"
-                                          [WP]::Set($img)
-                                      } catch {
-                                          Set-ItemProperty -Path "HKCU:\Control Panel\Colors" -Name "Background" -Value "0 0 0"
-                                          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "WallPaper" -Value ""
-                                      }
-                                      Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
-                                      Start-Sleep -Seconds 2
-                                      Start-Process explorer.exe -ErrorAction SilentlyContinue
-                                      
-                                      choco install brave vscode -y
-                                      wsl --install -d Ubuntu-22.04 --no-launch
-                                      Start-Sleep 15
-                                      wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash rdp && echo 'rdp:root' | chpasswd && usermod -aG sudo rdp"
-                                      wsl -d Ubuntu-22.04 -u root bash -c "echo -e '[user]\ndefault=rdp\n[boot]\nsystemd=true' > /etc/wsl.conf"
-                                      wsl -t Ubuntu-22.04
-                                      Start-Sleep 5
-                                      wsl -d Ubuntu-22.04 -u root bash -c "apt update -y && DEBIAN_FRONTEND=noninteractive apt install neofetch nmap openssh-server -y"
-                                      wsl -d Ubuntu-22.04 -u root bash -c "echo '' >> /etc/ssh/sshd_config && echo 'ListenAddress 0.0.0.0' >> /etc/ssh/sshd_config && echo 'Port 8022' >> /etc/ssh/sshd_config && echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config"
-                                      
+
+                          switch -Regex ($text) {
+                              "^/(start|help)" {
+                                  Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare`n`n💡 <b>AzureBot AI:</b> Kirim chat teks biasa tanpa awalan / untuk mengobrol secara langsung dengan saya!"
+                              }
+                              "^/ip" { 
+                                  $guacLink = "Belum di-setup (Ketik /setup)"
+                                  if (Test-Path "C:\guac-url.txt") { $guacLink = Get-Content "C:\guac-url.txt" }
+                                  Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nGuacamole: <code>$guacLink</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" 
+                              }
+                              "^/status" { 
+                                  $procInstance = Get-CimInstance Win32_Processor
+                                  $cpuName = ($procInstance | Select-Object -First 1).Name.Trim()
+                                  $cpuLoad = ($procInstance | Measure-Object -Property LoadPercentage -Average).Average
+                                  $os = Get-CimInstance Win32_OperatingSystem
+                                  $totalRam = [math]::Round($os.TotalVisibleMemorySize / 1024 / 1024, 2)
+                                  $freeRam = [math]::Round($os.FreePhysicalMemory / 1024 / 1024, 2)
+                                  $usedRam = $totalRam - $freeRam
+                                  $up = (Get-Date) - $os.LastBootUpTime
+                                  $upStr = "$($up.Hours) Jam, $($up.Minutes) Menit"
+                                  $remMins = 360 - $up.TotalMinutes
+                                  if ($remMins -lt 0) { $remMins = 0 }
+                                  $remTimeSpan = [timespan]::fromminutes($remMins)
+                                  $remStr = "$($remTimeSpan.Hours) Jam, $($remTimeSpan.Minutes) Menit"
+                                  Send-Msg "[STATS] <b>SYSTEM HEALTH</b>`n- CPU Model: <code>$cpuName</code>`n- CPU Load: $cpuLoad%`n- RAM: $usedRam GB / $totalRam GB`n- Free: $freeRam GB`n- Uptime: $upStr`n- Sisa VM: $remStr"
+                              }
+                              "^/speedtest" {
+                                  Send-Msg "[NET] Menjalankan Speedtest Ookla (15 detik)..."
+                                  $out = (speedtest.exe --accept-license --accept-gdpr 2>&1 | Out-String).Replace("<", "&lt;").Replace(">", "&gt;")
+                                  Send-Msg "[NET] <b>Hasil Speedtest:</b>`n<pre>$out</pre>"
+                              }
+                              "^/scanhost" {
+                                  Send-Msg "[NET] Mengeksekusi Nmap audit ke Windows Host Machine dari dalam WSL..."
+                                  $rawOut = Execute-WithTimeout "wsl.exe" "-d Ubuntu-22.04 -u root bash -c `"nmap \$(ip route show default | awk '{print \$3}') 2>&1`""
+                                  $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
+                                  Send-Msg "[SCAN] <b>Hasil Scan Host:</b>`n<pre>$out</pre>"
+                              }
+                              "^/setup" {
+                                  $wslCheck = wsl.exe -l -q 2>$null
+                                  if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
+                                      Send-Msg "[V] GUI Apps & WSL tampaknya sudah aktif."
+                                  } else {
+                                      Send-Msg "[SYS] <b>Mengeksekusi Workstation Suite...</b>`n- Tweak UI & 4K Dark Wallpaper`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04 & SSH Engine`n- Docker Engine & Apache Guacamole WebRDP`n`nBerjalan di background (3-5 menit)."
+                                      Start-Job -ScriptBlock {
+                                          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
+                                          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
+                                          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 1
+                                          Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "ColorPrevalence" -Value 0
+                                          
+                                          $url = "https://4kwallpapers.com/images/wallpapers/windows-11-dark-mode-abstract-background-black-background-7680x4320-8710.png"
+                                          $img = "$env:TEMP\wallpaper.png"
+                                          try {
+                                              Invoke-WebRequest -Uri $url -OutFile $img -UseBasicParsing -TimeoutSec 15
+                                              Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class WP { [DllImport(`"user32.dll`", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int uA, int uP, string lpv, int fu); public static void Set(string p) { SystemParametersInfo(20, 0, p, 3); } }"
+                                              [WP]::Set($img)
+                                          } catch {
+                                              Set-ItemProperty -Path "HKCU:\Control Panel\Colors" -Name "Background" -Value "0 0 0"
+                                              Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "WallPaper" -Value ""
+                                          }
+                                          Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+                                          Start-Sleep -Seconds 2
+                                          Start-Process explorer.exe -ErrorAction SilentlyContinue
+                                          
+                                          choco install brave vscode -y
+                                          wsl --install -d Ubuntu-22.04 --no-launch
+                                          Start-Sleep 15
+                                          wsl -d Ubuntu-22.04 -u root bash -c "useradd -m -s /bin/bash rdp && echo 'rdp:root' | chpasswd && usermod -aG sudo rdp"
+                                          wsl -d Ubuntu-22.04 -u root bash -c "echo -e '[user]\ndefault=rdp\n[boot]\nsystemd=true' > /etc/wsl.conf"
+                                          wsl -t Ubuntu-22.04
+                                          Start-Sleep 5
+                                          wsl -d Ubuntu-22.04 -u root bash -c "apt update -y && DEBIAN_FRONTEND=noninteractive apt install neofetch nmap openssh-server -y"
+                                          wsl -d Ubuntu-22.04 -u root bash -c "echo '' >> /etc/ssh/sshd_config && echo 'ListenAddress 0.0.0.0' >> /etc/ssh/sshd_config && echo 'Port 8022' >> /etc/ssh/sshd_config && echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config"
+                                          
+                                          $wslIP = ((wsl -d Ubuntu-22.04 -u root bash -c "hostname -I") -split '\s+')[0].Trim()
+                                          netsh interface portproxy add v4tov4 listenport=8022 listenaddress=0.0.0.0 connectport=8022 connectaddress=$wslIP
+                                          netsh advfirewall firewall add rule name="WSL-SSH-Bypass" dir=in action=allow protocol=TCP localport=8022
+                                          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -Command `"wsl -d Ubuntu-22.04 -u root /usr/sbin/sshd -D`"" -NoNewWindow
+
+                                          $guacCode = @(
+                                              "export DEBIAN_FRONTEND=noninteractive",
+                                              "apt-get install docker.io -y",
+                                              "mkdir -p /etc/guacamole",
+                                              "WIN_IP=`$(ip route show default | awk '{print `$3}')",
+                                              "cat <<EOF > /etc/guacamole/user-mapping.xml",
+                                              "<user-mapping>",
+                                              "  <authorize username=`"runneradmin`" password=`"$using:passInfo`">",
+                                              "    <connection name=`"AzureFinale GUI`">",
+                                              "      <protocol>rdp</protocol>",
+                                              "      <param name=`"hostname`">`$WIN_IP</param>",
+                                              "      <param name=`"port`">3389</param>",
+                                              "      <param name=`"username`">runneradmin</param>",
+                                              "      <param name=`"password`">`$using:passInfo</param>",
+                                              "      <param name=`"ignore-cert`">true</param>",
+                                              "    </connection>",
+                                              "  </authorize>",
+                                              "</user-mapping>",
+                                              "EOF",
+                                              "docker network create guacnet || true",
+                                              "docker run -d --restart always --name guacd --network guacnet guacamole/guacd",
+                                              "docker run -d --restart always --name guacamole --network guacnet -e GUACD_HOSTNAME=guacd -p 9000:8080 -v /etc/guacamole/user-mapping.xml:/etc/guacamole/user-mapping.xml guacamole/guacamole"
+                                          )
+                                          $guacCode | Set-Content -Path "C:\guac.sh" -Encoding ASCII
+                                          wsl -d Ubuntu-22.04 -u root bash -c "tr -d '\r' < /mnt/c/guac.sh > /root/setup_guac.sh && bash /root/setup_guac.sh"
+                                          
+                                          netsh interface portproxy add v4tov4 listenport=9000 listenaddress=0.0.0.0 connectport=9000 connectaddress=$wslIP
+                                          netsh advfirewall firewall add rule name="WSL-Guacamole" dir=in action=allow protocol=TCP localport=9000
+
+                                          Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:9000 > C:\cf-guac.log 2>&1" -WindowStyle Hidden
+                                          Start-Sleep -Seconds 12
+                                          $cfLog = Get-Content "C:\cf-guac.log" -Raw
+                                          if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") {
+                                              $guacUrl = $matches[1] + "/guacamole/"
+                                              Set-Content -Path "C:\guac-url.txt" -Value $guacUrl -Encoding UTF8
+                                              $payload = @{ 
+                                                  chat_id = "$using:allowedId"; 
+                                                  text = "[V] <b>GUI Deployment Sukses!</b>`nApache Guacamole WebRDP aktif.`nURL: <code>$guacUrl</code>"; 
+                                                  parse_mode = "HTML"
+                                              } | ConvertTo-Json -Depth 3
+                                              Invoke-RestMethod -Uri "https://api.telegram.org/bot$using:botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload | Out-Null
+                                          }
+                                      } | Out-Null
+                                  }
+                              }
+                              "^/bridgewsl (\d+)" {
+                                  $port = $matches[1]
+                                  $wslCheck = wsl.exe -l -q 2>$null
+                                  if ([string]::IsNullOrWhiteSpace($wslCheck)) {
+                                      Send-Msg "[X] <b>WSL belum terinstal!</b>"
+                                  } else {
                                       $wslIP = ((wsl -d Ubuntu-22.04 -u root bash -c "hostname -I") -split '\s+')[0].Trim()
-                                      netsh interface portproxy add v4tov4 listenport=8022 listenaddress=0.0.0.0 connectport=8022 connectaddress=$wslIP
-                                      netsh advfirewall firewall add rule name="WSL-SSH-Bypass" dir=in action=allow protocol=TCP localport=8022
-                                      Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -Command `"wsl -d Ubuntu-22.04 -u root /usr/sbin/sshd -D`"" -NoNewWindow
-
-                                      $guacCode = @(
-                                          "export DEBIAN_FRONTEND=noninteractive",
-                                          "apt-get install docker.io -y",
-                                          "mkdir -p /etc/guacamole",
-                                          "WIN_IP=`$(ip route show default | awk '{print `$3}')",
-                                          "cat <<EOF > /etc/guacamole/user-mapping.xml",
-                                          "<user-mapping>",
-                                          "  <authorize username=`"runneradmin`" password=`"$using:passInfo`">",
-                                          "    <connection name=`"AzureFinale GUI`">",
-                                          "      <protocol>rdp</protocol>",
-                                          "      <param name=`"hostname`">`$WIN_IP</param>",
-                                          "      <param name=`"port`">3389</param>",
-                                          "      <param name=`"username`">runneradmin</param>",
-                                          "      <param name=`"password`">`$using:passInfo</param>",
-                                          "      <param name=`"ignore-cert`">true</param>",
-                                          "    </connection>",
-                                          "  </authorize>",
-                                          "</user-mapping>",
-                                          "EOF",
-                                          "docker network create guacnet || true",
-                                          "docker run -d --restart always --name guacd --network guacnet guacamole/guacd",
-                                          "docker run -d --restart always --name guacamole --network guacnet -e GUACD_HOSTNAME=guacd -p 9000:8080 -v /etc/guacamole/user-mapping.xml:/etc/guacamole/user-mapping.xml guacamole/guacamole"
-                                      )
-                                      $guacCode | Set-Content -Path "C:\guac.sh" -Encoding ASCII
-                                      wsl -d Ubuntu-22.04 -u root bash -c "tr -d '\r' < /mnt/c/guac.sh > /root/setup_guac.sh && bash /root/setup_guac.sh"
-                                      
-                                      netsh interface portproxy add v4tov4 listenport=9000 listenaddress=0.0.0.0 connectport=9000 connectaddress=$wslIP
-                                      netsh advfirewall firewall add rule name="WSL-Guacamole" dir=in action=allow protocol=TCP localport=9000
-
-                                      Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:9000 > C:\cf-guac.log 2>&1" -WindowStyle Hidden
-                                      Start-Sleep -Seconds 12
-                                      $cfLog = Get-Content "C:\cf-guac.log" -Raw
-                                      if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") {
-                                          $guacUrl = $matches[1] + "/guacamole/"
-                                          Set-Content -Path "C:\guac-url.txt" -Value $guacUrl -Encoding UTF8
-                                          $payload = @{ 
-                                              chat_id = "$using:allowedId"; 
-                                              text = "[V] <b>GUI Deployment Sukses!</b>`nApache Guacamole WebRDP aktif.`nURL: <code>$guacUrl</code>"; 
-                                              parse_mode = "HTML"
-                                          } | ConvertTo-Json -Depth 3
-                                          Invoke-RestMethod -Uri "https://api.telegram.org/bot$using:botToken/sendMessage" -Method Post -ContentType "application/json" -Body $payload | Out-Null
-                                      }
-                                  } | Out-Null
+                                      netsh interface portproxy add v4tov4 listenport=$port listenaddress=0.0.0.0 connectport=$port connectaddress=$wslIP
+                                      netsh advfirewall firewall add rule name="WSL-Bridge-$port" dir=in action=allow protocol=TCP localport=$port
+                                      Send-Msg "[NET] <b>WSL Port $port Bridged!</b>`nBuka browser HP-mu ke: <code>http://$ipInfo`:$port</code>"
+                                  }
                               }
-                          }
-                          "^/bridgewsl (\d+)" {
-                              $port = $matches[1]
-                              $wslCheck = wsl.exe -l -q 2>$null
-                              if ([string]::IsNullOrWhiteSpace($wslCheck)) {
-                                  Send-Msg "[X] <b>WSL belum terinstal!</b>"
-                              } else {
-                                  $wslIP = ((wsl -d Ubuntu-22.04 -u root bash -c "hostname -I") -split '\s+')[0].Trim()
-                                  netsh interface portproxy add v4tov4 listenport=$port listenaddress=0.0.0.0 connectport=$port connectaddress=$wslIP
-                                  netsh advfirewall firewall add rule name="WSL-Bridge-$port" dir=in action=allow protocol=TCP localport=$port
-                                  Send-Msg "[NET] <b>WSL Port $port Bridged!</b>`nBuka browser HP-mu ke: <code>http://$ipInfo`:$port</code>"
+                              "^/fetch (.+)" {
+                                  $fPath = $matches[1].Trim()
+                                  if (Test-Path $fPath) {
+                                      Send-Msg "[SYS] Mengirimkan berkas <code>$fPath</code> ke Telegram..."
+                                      curl.exe -s -F "chat_id=$allowedId" -F "document=@$fPath" "https://api.telegram.org/bot$botToken/sendDocument" | Out-Null
+                                  } else { Send-Msg "[X] File tidak ditemukan di path: <code>$fPath</code>" }
                               }
-                          }
-                          "^/fetch (.+)" {
-                              $fPath = $matches[1].Trim()
-                              if (Test-Path $fPath) {
-                                  Send-Msg "[SYS] Mengirimkan berkas <code>$fPath</code> ke Telegram..."
-                                  curl.exe -s -F "chat_id=$allowedId" -F "document=@$fPath" "https://api.telegram.org/bot$botToken/sendDocument" | Out-Null
-                              } else { Send-Msg "[X] File tidak ditemukan di path: <code>$fPath</code>" }
-                          }
-                          "^/kill (.+)" {
-                              $pName = $matches[1].Trim()
-                              Send-Msg "[💀] Menjalankan operasi algojo untuk memburu proses: <code>$pName</code>..."
-                              $winOut = (taskkill.exe /F /IM "${pName}.exe" /T 2>&1 | Out-String).Trim()
-                              $linuxOut = ""
-                              $wslCheck = wsl.exe -l -q 2>$null
-                              if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
-                                  $linuxOut = (wsl.exe -d Ubuntu-22.04 -u root bash -c "pkill -9 -f $pName" 2>&1 | Out-String).Trim()
+                              "^/kill (.+)" {
+                                  $pName = $matches[1].Trim()
+                                  Send-Msg "[💀] Menjalankan operasi algojo untuk memburu proses: <code>$pName</code>..."
+                                  $winOut = (taskkill.exe /F /IM "${pName}.exe" /T 2>&1 | Out-String).Trim()
+                                  $linuxOut = ""
+                                  $wslCheck = wsl.exe -l -q 2>$null
+                                  if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
+                                      $linuxOut = (wsl.exe -d Ubuntu-22.04 -u root bash -c "pkill -9 -f $pName" 2>&1 | Out-String).Trim()
+                                  }
+                                  Send-Msg "[💀] <b>Hasil Eksekusi:</b>`nWindows: <pre>$winOut</pre>`nWSL: <pre>$linuxOut</pre>"
                               }
-                              Send-Msg "[💀] <b>Hasil Eksekusi:</b>`nWindows: <pre>$winOut</pre>`nWSL: <pre>$linuxOut</pre>"
-                          }
-                          "^/cmd (.+)" { 
-                              $cmd = $matches[1]
-                              if ($cmd -match $blacklist) {
-                                  Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
-                              } else {
-                                  $rawOut = Execute-WithTimeout "cmd.exe" "/c `"$cmd 2>&1`""
-                                  $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
-                                  Send-Msg "[CMD] <b>Output:</b>`n<pre>$out</pre>"
+                              "^/cmd (.+)" { 
+                                  $cmd = $matches[1]
+                                  if ($cmd -match $blacklist) {
+                                      Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock."
+                                  } else {
+                                      $rawOut = Execute-WithTimeout "cmd.exe" "/c `"$cmd 2>&1`""
+                                      $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
+                                      Send-Msg "[CMD] <b>Output:</b>`n<pre>$out</pre>"
+                                  }
                               }
-                          }
-                          "^/ps (.+)" { 
-                              $cmd = $matches[1]
-                              if ($cmd -match $blacklist) {
-                                  Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
-                              } else {
-                                  $rawOut = Execute-WithTimeout "powershell.exe" "-Command `"$cmd`""
-                                  $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
-                                  Send-Msg "[PS] <b>Output:</b>`n<pre>$out</pre>"
+                              "^/ps (.+)" { 
+                                  $cmd = $matches[1]
+                                  if ($cmd -match $blacklist) {
+                                      Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock."
+                                  } else {
+                                      $rawOut = Execute-WithTimeout "powershell.exe" "-Command `"$cmd`""
+                                      $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
+                                      Send-Msg "[PS] <b>Output:</b>`n<pre>$out</pre>"
+                                  }
                               }
-                          }
-                          "^/wsl (.+)" { 
-                              $cmd = $matches[1]
-                              $wslCheck = wsl.exe -l -q 2>$null
-                              if ([string]::IsNullOrWhiteSpace($wslCheck)) {
-                                  Send-Msg "[X] <b>WSL belum terinstal!</b>`nTekan tombol atau ketik <code>/setup</code> terlebih dahulu."
-                              } elseif ($cmd -match $blacklist) {
-                                  Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock (GUI/Interactive)."
-                              } else {
-                                  $rawOut = Execute-WithTimeout "wsl.exe" "-d Ubuntu-22.04 -u root bash -c `"$cmd 2>&1`""
-                                  $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
-                                  Send-Msg "[WSL] <b>Output:</b>`n<pre>$out</pre>"
+                              "^/wsl (.+)" { 
+                                  $cmd = $matches[1]
+                                  $wslCheck = wsl.exe -l -q 2>$null
+                                  if ([string]::IsNullOrWhiteSpace($wslCheck)) {
+                                      Send-Msg "[X] <b>WSL belum terinstal!</b>`nTekan tombol atau ketik <code>/setup</code> terlebih dahulu."
+                                  } elseif ($cmd -match $blacklist) {
+                                      Send-Msg "[!] <b>Command Blocked:</b>`nAplikasi '$cmd' dicekal karena memicu deadlock."
+                                  } else {
+                                      $rawOut = Execute-WithTimeout "wsl.exe" "-d Ubuntu-22.04 -u root bash -c `"$cmd 2>&1`""
+                                      $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
+                                      Send-Msg "[WSL] <b>Output:</b>`n<pre>$out</pre>"
+                                  }
                               }
+                              "^/expose (\d+)" {
+                                  $port = $matches[1]
+                                  Send-Msg "[NET] Membuka terowongan Cloudflare untuk Port $port..."
+                                  Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:$port > C:\cf-$port.log 2>&1" -WindowStyle Hidden
+                                  Start-Sleep -Seconds 7
+                                  $cfLog = Get-Content "C:\cf-$port.log" -Raw
+                                  if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") { Send-Msg "[V] <b>Tunnel Aktif!</b>`nURL: <code>$($matches[1])</code>" } else { Send-Msg "[X] Gagal mendapatkan URL." }
+                              }                          
+                              "^/screenshot" {
+                                  Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
+                                  $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                                  $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+                                  $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+                                  $graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size)
+                                  $path = "$env:TEMP\ss.jpg"; $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+                                  curl.exe -s -F "chat_id=$allowedId" -F "photo=@$path" "https://api.telegram.org/bot$allowedId" | Out-Null
+                              }
+                              default { Send-Msg "[?] Perintah tidak dikenal." }
                           }
-                          "^/expose (\d+)" {
-                              $port = $matches[1]
-                              Send-Msg "[NET] Membuka terowongan Cloudflare untuk Port $port..."
-                              Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:$port > C:\cf-$port.log 2>&1" -WindowStyle Hidden
-                              Start-Sleep -Seconds 7
-                              $cfLog = Get-Content "C:\cf-$port.log" -Raw
-                              if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") { Send-Msg "[V] <b>Tunnel Aktif!</b>`nURL: <code>$($matches[1])</code>" } else { Send-Msg "[X] Gagal mendapatkan URL." }
-                          }                          
-                          "^/screenshot" {
-                              Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
-                              $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-                              $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-                              $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-                              $graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size)
-                              $path = "$env:TEMP\ss.jpg"; $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-                              curl.exe -s -F "chat_id=$allowedId" -F "photo=@$path" "https://api.telegram.org/bot$botToken/sendPhoto" | Out-Null
+                      } else {
+                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis dari Farid Achmad yang berjalan di atas sistem Azure Finale Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. Jangan terlalu kaku. JANGAN PERNAH menyebut dirimu Gemini, ChatGPT, atau buatan Google. Kamu adalah AzureBot, entitas mandiri pelayan sistem."
+                          $bodyPayload = @{ contents = @(@{ parts = @(@{ text = ($aiPrompt + "`n`nUser: " + $text) }) }) } | ConvertTo-Json -Depth 5 -Compress
+                          try {
+                              $aiRes = Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$geminiKey" -Method Post -ContentType "application/json" -Body $bodyPayload -TimeoutSec 12
+                              $aiText = $aiRes.candidates[0].content.parts[0].text
+                              if (-not [string]::IsNullOrWhiteSpace($aiText)) {
+                                  try {
+                                      $pld = @{ chat_id = $senderId; text = $aiText; parse_mode = "HTML" } | ConvertTo-Json
+                                      Invoke-RestMethod -Uri "https://api.telegram.org/bot$senderId" -Method Post -ContentType "application/json" -Body $pld | Out-Null
+                                  } catch {}
+                              }
+                          } catch {
+                              try {
+                                  $pld = @{ chat_id = $senderId; text = "[AzureBot] Otak AI saya sedang mendeteksi gangguan pada jaringan luar sistem."; parse_mode = "HTML" } | ConvertTo-Json
+                                  Invoke-RestMethod -Uri "https://api.telegram.org/bot$senderId" -Method Post -ContentType "application/json" -Body $pld | Out-Null
+                              } catch {}
                           }
-                          default { Send-Msg "[?] Perintah tidak dikenal." }
                       }
                   }
               } catch { Start-Sleep -Seconds 5 }
@@ -394,7 +416,8 @@ jobs:
           $finalBotCode = $botScriptCode -replace "___BOT_TOKEN___", "${{ secrets.TELEGRAM_BOT_TOKEN }}" `
                                          -replace "___CHAT_ID___", "${{ secrets.TELEGRAM_CHAT_ID }}" `
                                          -replace "___IP___", $env:TAILSCALE_IP `
-                                         -replace "___PASS___", $env:RDP_PASS
+                                         -replace "___PASS___", $env:RDP_PASS `
+                                         -replace "___GEMINI_KEY___", "${{ secrets.GEMINI_API_KEY }}"
 
           $botFile = "azure-finale.ps1"
           Set-Content -Path $botFile -Value $finalBotCode -Encoding UTF8
@@ -405,6 +428,5 @@ jobs:
         run: |
           $ts = $env:TS_PATH
           if ($ts -ne $null -and (Test-Path $ts)) {
-              Write-Host "Membersihkan exit node..."
               & $ts logout
           }
