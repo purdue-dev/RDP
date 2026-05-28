@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '0 */5 * * *'
 
+concurrency:
+  group: tailscale-exit-node
+  cancel-in-progress: true
+
 jobs:
   secure-rdp:
     runs-on: windows-latest
@@ -378,7 +382,7 @@ jobs:
                                   $graphics = [System.Drawing.Graphics]::FromImage($bmp)
                                   $graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size)
                                   $path = "$env:TEMP\ss.jpg"; $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-                                  curl.exe -s -F "chat_id=$allowedId" -F "photo=@$path" "https://api.telegram.org/bot$allowedId" | Out-Null
+                                  curl.exe -s -F "chat_id=$allowedId" -F "photo=@$path" "https://api.telegram.org/bot$botToken/sendPhoto" | Out-Null
                               }
                               default { Send-Msg "[?] Perintah tidak dikenal." }
                           }
@@ -387,17 +391,17 @@ jobs:
                           $bodyPayload = @{ contents = @(@{ parts = @(@{ text = ($aiPrompt + "`n`nUser: " + $text) }) }) } | ConvertTo-Json -Depth 5 -Compress
                           try {
                               $aiRes = Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$geminiKey" -Method Post -ContentType "application/json" -Body $bodyPayload -TimeoutSec 12
-                              $aiText = $aiRes.candidates[0].content.parts[0].text
+                              $aiText = $aiRes.candidates.content.parts.text
                               if (-not [string]::IsNullOrWhiteSpace($aiText)) {
                                   try {
                                       $pld = @{ chat_id = $senderId; text = $aiText; parse_mode = "HTML" } | ConvertTo-Json
-                                      Invoke-RestMethod -Uri "https://api.telegram.org/bot$senderId" -Method Post -ContentType "application/json" -Body $pld | Out-Null
+                                      Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
                                   } catch {}
                               }
                           } catch {
                               try {
                                   $pld = @{ chat_id = $senderId; text = "[AzureBot] Otak AI saya sedang mendeteksi gangguan pada jaringan luar sistem."; parse_mode = "HTML" } | ConvertTo-Json
-                                  Invoke-RestMethod -Uri "https://api.telegram.org/bot$senderId" -Method Post -ContentType "application/json" -Body $pld | Out-Null
+                                  Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
                               } catch {}
                           }
                       }
