@@ -1,4 +1,4 @@
-name: RDP-v3.5-AzureFinale
+name: RDP-v3.5-AzureWorkstation
 
 on:
   workflow_dispatch:
@@ -138,7 +138,7 @@ jobs:
               Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -Method Post -ContentType "application/json" -Body $menuPayload | Out-Null
           } catch { Write-Host "Error Set Menu: $_" }
 
-          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nGuacamole: <code>Belum di-setup (Ketik /setup)</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi. Kamu juga bisa chat langsung dengan saya tanpa simbol / untuk berinteraksi!"
+          $initMsg = "[SYS] <b>AZURE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nGuacamole: <code>Belum di-setup (Ketik /setup)</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi. Kamu juga bisa chat langsung dengan saya tanpa simbol / untuk berinteraksi!"
           Send-Msg $initMsg
           '@
           Set-Content -Path "C:\bot-part1.txt" -Value $code -Encoding UTF8
@@ -184,7 +184,7 @@ jobs:
 
                           switch -Regex ($text) {
                               "^/(start|help)" {
-                                  Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare`n`n💡 <b>AzureBot AI:</b> Kirim chat teks biasa tanpa awalan / untuk mengobrol secara langsung dengan saya!"
+                                  Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Workstation)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare`n`n💡 <b>AzureBot AI:</b> Kirim chat teks biasa tanpa awalan / untuk mengobrol secara langsung dengan saya!"
                               }
                               "^/ip" { 
                                   $guacLink = "Belum di-setup (Ketik /setup)"
@@ -267,7 +267,7 @@ jobs:
                                               "cat <<EOF > /etc/guacamole/user-mapping.xml",
                                               "<user-mapping>",
                                               "  <authorize username=`"runneradmin`" password=`"$using:passInfo`">",
-                                              "    <connection name=`"AzureFinale GUI`">",
+                                              "    <connection name=`"Azure Workstation GUI`">",
                                               "      <protocol>rdp</protocol>",
                                               "      <param name=`"hostname`">`$WIN_IP</param>",
                                               "      <param name=`"port`">3389</param>",
@@ -387,7 +387,7 @@ jobs:
                               default { Send-Msg "[?] Perintah tidak dikenal." }
                           }
                       } else {
-                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis dari Farid Achmad yang berjalan di atas sistem Azure Finale Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. Jangan terlalu kaku. JANGAN PERNAH menyebut dirimu Gemini, ChatGPT, atau buatan Google. Kamu adalah AzureBot, entitas mandiri pelayan sistem."
+                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis dari Farid Achmad yang berjalan di atas sistem Azure Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. Jangan terlalu kaku. JANGAN PERNAH menyebut dirimu Gemini, ChatGPT, atau buatan Google. Kamu adalah AzureBot, entitas mandiri pelayan sistem."
                           
                           $q = [char]34
                           $fullPrompt = $aiPrompt + "`n`nUser: " + $text
@@ -399,14 +399,14 @@ jobs:
                               $aiText = $aiRes.candidates.content.parts.text
                               if (-not [string]::IsNullOrWhiteSpace($aiText)) {
                                   try {
-                                      $pld = @{ chat_id = $senderId; text = $aiText; parse_mode = "HTML" } | ConvertTo-Json
+                                      $pld = @{ chat_id = $senderId; text = $aiText } | ConvertTo-Json
                                       Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
                                   } catch {}
                               }
                           } catch {
                               try {
                                   $errorMsg = "[AzureBot] API Error: " + $_.Exception.Message
-                                  $pld = @{ chat_id = $senderId; text = $errorMsg; parse_mode = "HTML" } | ConvertTo-Json
+                                  $pld = @{ chat_id = $senderId; text = $errorMsg } | ConvertTo-Json
                                   Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
                               } catch {}
                           }
