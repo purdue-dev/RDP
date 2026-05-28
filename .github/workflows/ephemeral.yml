@@ -330,12 +330,13 @@ jobs:
                               Start-Sleep 5
                               $cfLog = Get-Content "C:\cf-$port.log" -Raw
                               if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") { Send-Msg "[V] <b>Tunnel Aktif!</b>`nURL: <code>$($matches[1])</code>" } else { Send-Msg "[X] Gagal mendapatkan URL." }
-                          }
+                          }                          
                           "^/screenshot" {
                               Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
-                              $bmp = New-Object System.Drawing.Bitmap 1920, 1080
+                              $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                              $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
                               $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-                              $graphics.CopyFromScreen(0,0,0,0, [System.Drawing.Size]::new(1920, 1080))
+                              $graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size)
                               $path = "$env:TEMP\ss.jpg"; $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
                               curl.exe -s -F "chat_id=$allowedId" -F "photo=@$path" "https://api.telegram.org/bot$botToken/sendPhoto" | Out-Null
                           }
