@@ -387,10 +387,17 @@ jobs:
                               default { Send-Msg "[?] Perintah tidak dikenal." }
                           }
                       } else {
-                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis dari Farid Achmad yang berjalan di atas sistem Azure Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. Jangan terlalu kaku. JANGAN PERNAH menyebut dirimu Gemini, ChatGPT, atau buatan Google. Kamu adalah AzureBot, entitas mandiri pelayan sistem."
+                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis yang berjalan di atas sistem Azure Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. JANGAN PERNAH menyebut dirimu Gemini, ChatGPT, atau buatan Google. PENTING: Jawab senatural mungkin seperti manusia. DILARANG KERAS menggunakan garis pemisah seperti '---' atau '--'. Jangan terlalu banyak basa-basi, langsung ke inti jawaban."
                           
+                          $userStatus = ""
+                          if ($senderId -eq $allowedId) {
+                              $userStatus = "STATUS PENGGUNA: Tuan/Paduka Farid Achmad (@ridxdevs). Ini adalah Owner/Majikanmu. SELALU panggil dia dengan sebutan kehormatan 'Tuan' atau 'Paduka'. DILARANG memanggilnya dengan nama saja."
+                          } else {
+                              $userStatus = "STATUS PENGGUNA: Orang Asing/Guest. JANGAN panggil dia Tuan/Paduka. Jika dia bertanya siapa bosmu, jawab bahwa majikan/owner-mu adalah Tuan Farid Achmad (@ridxdevs)."
+                          }
+
                           $q = [char]34
-                          $fullPrompt = $aiPrompt + "`n`nUser: " + $text
+                          $fullPrompt = $aiPrompt + "`n`n" + $userStatus + "`n`nUser: " + $text
                           $escapedText = $fullPrompt | ConvertTo-Json
                           $bodyPayload = '{' + $q + 'contents' + $q + ':[{' + $q + 'parts' + $q + ':[{' + $q + 'text' + $q + ':' + $escapedText + '}]}]}'
                           
@@ -398,8 +405,16 @@ jobs:
                               $aiRes = Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$geminiKey" -Method Post -ContentType "application/json" -Body $bodyPayload -TimeoutSec 12
                               $aiText = $aiRes.candidates.content.parts.text
                               if (-not [string]::IsNullOrWhiteSpace($aiText)) {
+                                  
+                                  # --- MARKDOWN TO NATIVE TELEGRAM HTML CONVERTER ---
+                                  $aiText = $aiText.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;')
+                                  $aiText = $aiText -replace '(?s)```\w*\n?(.*?)```', '<pre>$1</pre>'
+                                  $aiText = $aiText -replace '(?s)`([^`]+)`', '<code>$1</code>'
+                                  $aiText = $aiText -replace '(?s)\*\*(.*?)\*\*', '<b>$1</b>'
+                                  $aiText = $aiText -replace '(?s)\*(.*?)\*', '<i>$1</i>'
+                                  
                                   try {
-                                      $pld = @{ chat_id = $senderId; text = $aiText } | ConvertTo-Json
+                                      $pld = @{ chat_id = $senderId; text = $aiText; parse_mode = "HTML" } | ConvertTo-Json
                                       Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
                                   } catch {}
                               }
