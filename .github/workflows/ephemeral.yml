@@ -388,9 +388,14 @@ jobs:
                           }
                       } else {
                           $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis dari Farid Achmad yang berjalan di atas sistem Azure Finale Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. Jangan terlalu kaku. JANGAN PERNAH menyebut dirimu Gemini, ChatGPT, atau buatan Google. Kamu adalah AzureBot, entitas mandiri pelayan sistem."
-                          $bodyPayload = @{ contents = @(@{ parts = @(@{ text = ($aiPrompt + "`n`nUser: " + $text) }) }) } | ConvertTo-Json -Depth 5 -Compress
+                          
+                          $q = [char]34
+                          $fullPrompt = $aiPrompt + "`n`nUser: " + $text
+                          $escapedText = $fullPrompt | ConvertTo-Json
+                          $bodyPayload = '{' + $q + 'contents' + $q + ':[{' + $q + 'parts' + $q + ':[{' + $q + 'text' + $q + ':' + $escapedText + '}]}]}'
+                          
                           try {
-                              $aiRes = Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$geminiKey" -Method Post -ContentType "application/json" -Body $bodyPayload -TimeoutSec 12
+                              $aiRes = Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$geminiKey" -Method Post -ContentType "application/json" -Body $bodyPayload -TimeoutSec 12
                               $aiText = $aiRes.candidates.content.parts.text
                               if (-not [string]::IsNullOrWhiteSpace($aiText)) {
                                   try {
@@ -400,7 +405,8 @@ jobs:
                               }
                           } catch {
                               try {
-                                  $pld = @{ chat_id = $senderId; text = "[AzureBot] Otak AI saya sedang mendeteksi gangguan pada jaringan luar sistem."; parse_mode = "HTML" } | ConvertTo-Json
+                                  $errorMsg = "[AzureBot] API Error: " + $_.Exception.Message
+                                  $pld = @{ chat_id = $senderId; text = $errorMsg; parse_mode = "HTML" } | ConvertTo-Json
                                   Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
                               } catch {}
                           }
