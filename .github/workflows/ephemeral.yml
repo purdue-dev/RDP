@@ -72,7 +72,6 @@ jobs:
           $ipInfo = "___IP___"
           $passInfo = "___PASS___"
           
-          # Master Regex Blacklist tetap dipasang sebagai filter baris pertama sebelum masuk engine timeout
           $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
           function Send-Msg ($msg) {
@@ -87,7 +86,6 @@ jobs:
               } catch { Write-Host "Error SendMsg: $_" }
           }
 
-          # Fungsi eksekusi pinter dengan hard-timeout 15 detik untuk menangkal segala jenis freeze/stuck
           function Execute-WithTimeout ($exe, $argsList) {
               $pInfo = New-Object System.Diagnostics.ProcessStartInfo
               $pInfo.FileName = $exe
@@ -106,11 +104,9 @@ jobs:
               try {
                   $proc.Start() | Out-Null
                   
-                  # Membaca stream secara asinkron agar tidak memblokir pembacaan timeout
                   $stdoutScript = { while (-not $proc.StandardOutput.EndOfStream) { $stdout.AppendLine($proc.StandardOutput.ReadLine()) | Out-Null } }
                   $stderrScript = { while (-not $proc.StandardError.EndOfStream) { $stderr.AppendLine($proc.StandardError.ReadLine()) | Out-Null } }
                   
-                  # Batas waktu aman: 15000 milidetik (15 detik)
                   $hasExited = $proc.WaitForExit(15000)
                   
                   if (-not $hasExited) {
@@ -146,7 +142,20 @@ jobs:
               Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -Method Post -ContentType "application/json" -Body $menuPayload | Out-Null
           } catch { Write-Host "Error Set Menu: $_" }
 
-          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
+          Write-Host "Membangun Web Terminal (ttyd) & Menggali Tunnel Cloudflare..."
+          
+          Invoke-WebRequest -Uri "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.win32.exe" -OutFile "C:\ttyd.exe" -UseBasicParsing
+          Start-Process cmd.exe -ArgumentList "/c C:\ttyd.exe -p 7681 -c runneradmin:$passInfo cmd.exe" -WindowStyle Hidden
+          Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:7681 > C:\cf-ttyd.log 2>&1" -WindowStyle Hidden
+          
+          Start-Sleep -Seconds 8
+          $cfLog = Get-Content "C:\cf-ttyd.log" -Raw
+          $ttydUrl = "Gagal memuat URL TTYD"
+          if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") {
+              $ttydUrl = $matches[1]
+          }
+
+          $initMsg = "[SYS] <b>AZURE FINALE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nTTYD Terminal: <code>$ttydUrl</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi."
           Send-Msg $initMsg
 
           $offset = 0
@@ -159,7 +168,6 @@ jobs:
                       
                       if ($senderId -ne $allowedId) { continue }
 
-                      # --- FITUR DETEKSI AUTO UPLOAD FILE ---
                       if ($update.message.document -ne $null) {
                           $doc = $update.message.document
                           $fName = $doc.file_name
@@ -177,14 +185,13 @@ jobs:
                           } catch { Send-Msg "[X] Gagal mendownload file: $_" }
                           continue
                       }
-                      # --------------------------------------
 
                       $text = $update.message.text
                       if ([string]::IsNullOrWhiteSpace($text)) { continue }
 
                       switch -Regex ($text) {
                           "^/(start|help)" {
-                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI & WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
+                              Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Finale)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP & Password RDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & WebRDP`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal"
                           }
                           "^/ip" { Send-Msg "[KEY] <b>Kredensial RDP:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`n`n[WSL] Bypass: <code>ssh rdp@$ipInfo -p 8022</code>" }
                           "^/status" { 
@@ -217,7 +224,7 @@ jobs:
                               if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
                                   Send-Msg "[V] GUI Apps & WSL tampaknya sudah aktif."
                               } else {
-                                  Send-Msg "[SYS] <b>Mengeksekusi Workstation Suite...</b>`n- Tweak UI & 4K Dark Wallpaper`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04 & SSH`n`nBerjalan di background (3-5 menit)."
+                                  Send-Msg "[SYS] <b>Mengeksekusi Workstation Suite...</b>`n- Tweak UI & 4K Dark Wallpaper`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04 & SSH`n- Docker & Apache Guacamole`n`nBerjalan di background (3-5 menit)."
                                   Start-Job -ScriptBlock {
                                       Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
                                       Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
@@ -254,6 +261,38 @@ jobs:
                                       netsh advfirewall firewall add rule name="WSL-SSH-Bypass" dir=in action=allow protocol=TCP localport=8022
                                       
                                       Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -Command `"wsl -d Ubuntu-22.04 -u root /usr/sbin/sshd -D`"" -NoNewWindow
+
+                                      $guacCode = @(
+                                          "export DEBIAN_FRONTEND=noninteractive",
+                                          "apt-get install docker.io -y",
+                                          "mkdir -p /etc/guacamole",
+                                          "WIN_IP=`$(ip route show default | awk '{print `$3}')",
+                                          "cat <<EOF > /etc/guacamole/user-mapping.xml",
+                                          "<user-mapping>",
+                                          "  <authorize username=`"runneradmin`" password=`"$passInfo`">",
+                                          "    <connection name=`"AzureFinale GUI`">",
+                                          "      <protocol>rdp</protocol>",
+                                          "      <param name=`"hostname`">`$WIN_IP</param>",
+                                          "      <param name=`"port`">3389</param>",
+                                          "      <param name=`"username`">runneradmin</param>",
+                                          "      <param name=`"password`">`$passInfo</param>",
+                                          "      <param name=`"ignore-cert`">true</param>",
+                                          "    </connection>",
+                                          "  </authorize>",
+                                          "</user-mapping>",
+                                          "EOF",
+                                          "docker network create guacnet || true",
+                                          "docker run -d --restart always --name guacd --network guacnet guacamole/guacd",
+                                          "docker run -d --restart always --name guacamole --network guacnet -p 9000:8080 -v /etc/guacamole/user-mapping.xml:/etc/guacamole/user-mapping.xml guacamole/guacamole"
+                                      )
+                                      
+                                      $guacCode | Set-Content -Path "C:\guac.sh" -Encoding ASCII
+                                      
+                                      wsl -d Ubuntu-22.04 -u root bash -c "tr -d '\r' < /mnt/c/guac.sh > /root/setup_guac.sh && bash /root/setup_guac.sh"
+                                      
+                                      netsh interface portproxy add v4tov4 listenport=9000 listenaddress=0.0.0.0 connectport=9000 connectaddress=$wslIP
+                                      netsh advfirewall firewall add rule name="WSL-Guacamole" dir=in action=allow protocol=TCP localport=9000
+
                                   } | Out-Null
                               }
                           }
@@ -280,9 +319,7 @@ jobs:
                               $pName = $matches[1].Trim()
                               Send-Msg "[💀] Menjalankan operasi algojo untuk memburu proses: <code>$pName</code>..."
                               
-                              # Bantai di Windows
                               $winOut = (taskkill.exe /F /IM "${pName}.exe" /T 2>&1 | Out-String).Trim()
-                              # Bantai di Linux WSL
                               $linuxOut = ""
                               $wslCheck = wsl.exe -l -q 2>$null
                               if (-not [string]::IsNullOrWhiteSpace($wslCheck)) {
@@ -327,7 +364,7 @@ jobs:
                               $port = $matches[1]
                               Send-Msg "[NET] Membuka terowongan Cloudflare untuk Port $port..."
                               Start-Process cmd.exe -ArgumentList "/c cloudflared tunnel --url http://localhost:$port > C:\cf-$port.log 2>&1" -WindowStyle Hidden
-                              Start-Sleep 5
+                              Start-Sleep -Seconds 7
                               $cfLog = Get-Content "C:\cf-$port.log" -Raw
                               if ($cfLog -match "(https://[a-zA-Z0-9-]+\.trycloudflare\.com)") { Send-Msg "[V] <b>Tunnel Aktif!</b>`nURL: <code>$($matches[1])</code>" } else { Send-Msg "[X] Gagal mendapatkan URL." }
                           }                          
