@@ -70,7 +70,7 @@ jobs:
           $allowedId = "___CHAT_ID___"
           $ipInfo = "___IP___"
           $passInfo = "___PASS___"
-          $geminiKey = "___GEMINI_KEY___"
+          $openRouterKey = "___OPENROUTER_KEY___"
           
           $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
@@ -387,7 +387,7 @@ jobs:
                               default { Send-Msg "[?] Perintah tidak dikenal." }
                           }
                       } else {
-                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis yang berjalan di atas sistem Azure Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. JANGAN PERNAH menyebut dirimu Gemini, ChatGPT, atau buatan Google. PENTING: Jawab senatural mungkin seperti manusia. DILARANG KERAS menggunakan garis pemisah seperti '---' atau '--'. Jangan terlalu banyak basa-basi, langsung ke inti jawaban."
+                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis yang berjalan di atas sistem Azure Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. JANGAN PERNAH menyebut dirimu Gemini, Llama, ChatGPT, atau buatan perusahaan manapun. PENTING: Jawab senatural mungkin seperti manusia. DILARANG KERAS menggunakan garis pemisah seperti '---' atau '--'. Jangan terlalu banyak basa-basi, langsung ke inti jawaban."
                           
                           $userStatus = ""
                           if ($senderId -eq $allowedId) {
@@ -396,14 +396,21 @@ jobs:
                               $userStatus = "STATUS PENGGUNA: Orang Asing/Guest. JANGAN panggil dia Tuan/Paduka. Jika dia bertanya siapa bosmu, jawab bahwa majikan/owner-mu adalah Tuan Farid Achmad (@ridxdevs)."
                           }
 
+                          $sysPrompt = $aiPrompt + "`n`n" + $userStatus
                           $q = [char]34
-                          $fullPrompt = $aiPrompt + "`n`n" + $userStatus + "`n`nUser: " + $text
-                          $escapedText = $fullPrompt | ConvertTo-Json
-                          $bodyPayload = '{' + $q + 'contents' + $q + ':[{' + $q + 'parts' + $q + ':[{' + $q + 'text' + $q + ':' + $escapedText + '}]}]}'
+                          $escapedSys = $sysPrompt | ConvertTo-Json
+                          $escapedUsr = $text | ConvertTo-Json
+                          
+                          $bodyPayload = '{' + $q + 'model' + $q + ':' + $q + 'meta-llama/llama-3-8b-instruct:free' + $q + ',' + $q + 'messages' + $q + ':[{' + $q + 'role' + $q + ':' + $q + 'system' + $q + ',' + $q + 'content' + $q + ':' + $escapedSys + '},{' + $q + 'role' + $q + ':' + $q + 'user' + $q + ',' + $q + 'content' + $q + ':' + $escapedUsr + '}]}'
                           
                           try {
-                              $aiRes = Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$geminiKey" -Method Post -ContentType "application/json" -Body $bodyPayload -TimeoutSec 12
-                              $aiText = $aiRes.candidates.content.parts.text
+                              $headers = @{
+                                  "Authorization" = "Bearer $openRouterKey"
+                                  "Content-Type"  = "application/json"
+                              }
+                              $aiRes = Invoke-RestMethod -Uri "https://openrouter.ai/api/v1/chat/completions" -Method Post -Headers $headers -Body $bodyPayload -TimeoutSec 15
+                              $aiText = $aiRes.choices[0].message.content
+                              
                               if (-not [string]::IsNullOrWhiteSpace($aiText)) {
                                   
                                   # --- MARKDOWN TO NATIVE TELEGRAM HTML CONVERTER ---
@@ -442,7 +449,7 @@ jobs:
                                          -replace "___CHAT_ID___", "${{ secrets.TELEGRAM_CHAT_ID }}" `
                                          -replace "___IP___", $env:TAILSCALE_IP `
                                          -replace "___PASS___", $env:RDP_PASS `
-                                         -replace "___GEMINI_KEY___", "${{ secrets.GEMINI_API_KEY }}"
+                                         -replace "___OPENROUTER_KEY___", "${{ secrets.OPENROUTER_API_KEY }}"
 
           $botFile = "azure-finale.ps1"
           Set-Content -Path $botFile -Value $finalBotCode -Encoding UTF8
