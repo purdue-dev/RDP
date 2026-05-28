@@ -1,4 +1,4 @@
-name: RDP-v3.5-AzureWorkstation
+name: RDP-v3.6-AzureWorkstation
 
 on:
   workflow_dispatch:
@@ -70,7 +70,7 @@ jobs:
           $allowedId = "___CHAT_ID___"
           $ipInfo = "___IP___"
           $passInfo = "___PASS___"
-          $openRouterKey = "___OPENROUTER_KEY___"
+          $groqKey = "___GROQ_KEY___"
           
           $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
@@ -184,7 +184,7 @@ jobs:
 
                           switch -Regex ($text) {
                               "^/(start|help)" {
-                                  Send-Msg "[INFO] <b>COMMAND CENTER v3.5 (Azure Workstation)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare`n`n💡 <b>AzureBot AI:</b> Kirim chat teks biasa tanpa awalan / untuk mengobrol secara langsung dengan saya!"
+                                  Send-Msg "[INFO] <b>COMMAND CENTER v3.6 (Azure Workstation)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare`n`n💡 <b>AzureBot AI (GPT-OSS-120B):</b> Kirim chat teks biasa tanpa awalan / untuk mengobrol secara langsung dengan saya!"
                               }
                               "^/ip" { 
                                   $guacLink = "Belum di-setup (Ketik /setup)"
@@ -401,14 +401,14 @@ jobs:
                           $escapedSys = $sysPrompt | ConvertTo-Json
                           $escapedUsr = $text | ConvertTo-Json
                           
-                          $bodyPayload = '{' + $q + 'model' + $q + ':' + $q + 'meta-llama/llama-3-8b-instruct:free' + $q + ',' + $q + 'messages' + $q + ':[{' + $q + 'role' + $q + ':' + $q + 'system' + $q + ',' + $q + 'content' + $q + ':' + $escapedSys + '},{' + $q + 'role' + $q + ':' + $q + 'user' + $q + ',' + $q + 'content' + $q + ':' + $escapedUsr + '}]}'
+                          $bodyPayload = '{' + $q + 'model' + $q + ':' + $q + 'openai/gpt-oss-120b' + $q + ',' + $q + 'messages' + $q + ':[{' + $q + 'role' + $q + ':' + $q + 'system' + $q + ',' + $q + 'content' + $q + ':' + $escapedSys + '},{' + $q + 'role' + $q + ':' + $q + 'user' + $q + ',' + $q + 'content' + $q + ':' + $escapedUsr + '}]}'
                           
                           try {
                               $headers = @{
-                                  "Authorization" = "Bearer $openRouterKey"
+                                  "Authorization" = "Bearer $groqKey"
                                   "Content-Type"  = "application/json"
                               }
-                              $aiRes = Invoke-RestMethod -Uri "https://openrouter.ai/api/v1/chat/completions" -Method Post -Headers $headers -Body $bodyPayload -TimeoutSec 15
+                              $aiRes = Invoke-RestMethod -Uri "https://api.groq.com/openai/v1/chat/completions" -Method Post -Headers $headers -Body $bodyPayload -TimeoutSec 15
                               $aiText = $aiRes.choices[0].message.content
                               
                               if (-not [string]::IsNullOrWhiteSpace($aiText)) {
@@ -427,7 +427,7 @@ jobs:
                               }
                           } catch {
                               try {
-                                  $errorMsg = "[AzureBot] API Error: " + $_.Exception.Message
+                                  $errorMsg = "[AzureBot Groq Error] API Error: " + $_.Exception.Message
                                   $pld = @{ chat_id = $senderId; text = $errorMsg } | ConvertTo-Json
                                   Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json" -Body $pld | Out-Null
                               } catch {}
@@ -449,7 +449,7 @@ jobs:
                                          -replace "___CHAT_ID___", "${{ secrets.TELEGRAM_CHAT_ID }}" `
                                          -replace "___IP___", $env:TAILSCALE_IP `
                                          -replace "___PASS___", $env:RDP_PASS `
-                                         -replace "___OPENROUTER_KEY___", "${{ secrets.OPENROUTER_API_KEY }}"
+                                         -replace "___GROQ_KEY___", "${{ secrets.GROQ_API_KEY }}"
 
           $botFile = "azure-finale.ps1"
           Set-Content -Path $botFile -Value $finalBotCode -Encoding UTF8
