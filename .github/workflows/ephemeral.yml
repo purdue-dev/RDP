@@ -38,23 +38,23 @@ jobs:
           echo "RDP_USER=runneradmin" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-          - name: Install Network Core (Tailscale, Speedtest, Cloudflared)
-            run: |
-              Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
+      - name: Install Network Core (Tailscale, Speedtest, Cloudflared)
+        run: |
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
 
-              Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
-              $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
-              $installProcess.WaitForExit()
-              
-              choco install speedtest cloudflared -y
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
+          $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
+          $installProcess.WaitForExit()
+          
+          choco install speedtest cloudflared -y
 
-              $paths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe")
-              $ts = ""
-              foreach ($p in $paths) { if (Test-Path $p) { $ts = $p; break } }
-              
-              echo "TS_PATH=$ts" >> $env:GITHUB_ENV
-              & $ts up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-runner-$env:GITHUB_RUN_ID" --advertise-exit-node --advertise-tags="tag:github" --accept-routes --unattended --reset
-              Start-Sleep -Seconds 15
+          $paths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe")
+          $ts = ""
+          foreach ($p in $paths) { if (Test-Path $p) { $ts = $p; break } }
+          
+          echo "TS_PATH=$ts" >> $env:GITHUB_ENV
+          & $ts up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-runner-$env:GITHUB_RUN_ID" --advertise-exit-node --advertise-tags="tag:github" --accept-routes --unattended --reset
+          Start-Sleep -Seconds 15
 
       - name: Get Tailscale IP
         run: |
