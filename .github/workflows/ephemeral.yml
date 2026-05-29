@@ -1,4 +1,4 @@
-name: RDP-v3.6-AzureWorkstation
+name: RDP-v5.0-AzureWorkstation
 
 on:
   workflow_dispatch:
@@ -18,6 +18,7 @@ jobs:
       - name: Enable RDP & OpenSSH Server
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
           
@@ -37,23 +38,23 @@ jobs:
           echo "RDP_USER=runneradmin" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install Network Core (Tailscale, Speedtest, Cloudflared)
-        run: |
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
+          - name: Install Network Core (Tailscale, Speedtest, Cloudflared)
+            run: |
+              Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "IPEnableRouter" -Value 1
 
-          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
-          $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
-          $installProcess.WaitForExit()
-          
-          choco install speedtest cloudflared -y
+              Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
+              $installProcess = Start-Process msiexec.exe -ArgumentList "/i ts.msi /quiet /norestart" -Wait -PassThru -NoNewWindow
+              $installProcess.WaitForExit()
+              
+              choco install speedtest cloudflared -y
 
-          $paths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe")
-          $ts = ""
-          foreach ($p in $paths) { if (Test-Path $p) { $ts = $p; break } }
-          
-          echo "TS_PATH=$ts" >> $env:GITHUB_ENV
-          & $ts up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-runner-$env:GITHUB_RUN_ID" --advertise-exit-node --advertise-tags="tag:github" --accept-routes --unattended --reset
-          Start-Sleep -Seconds 15
+              $paths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe")
+              $ts = ""
+              foreach ($p in $paths) { if (Test-Path $p) { $ts = $p; break } }
+              
+              echo "TS_PATH=$ts" >> $env:GITHUB_ENV
+              & $ts up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-runner-$env:GITHUB_RUN_ID" --advertise-exit-node --advertise-tags="tag:github" --accept-routes --unattended --reset
+              Start-Sleep -Seconds 15
 
       - name: Get Tailscale IP
         run: |
@@ -61,16 +62,20 @@ jobs:
           $tsIP = & $ts ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Build Bot Engine (Part 1 - Core Framework)
+      - name: Run AzureBot Core Engine
+        shell: pwsh
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          $code = @'
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-          $botToken = "___BOT_TOKEN___"
-          $allowedId = "___CHAT_ID___"
-          $ipInfo = "___IP___"
-          $passInfo = "___PASS___"
-          $groqKey = "___GROQ_KEY___"
+          $botToken = $env:BOT_TOKEN
+          $allowedId = $env:CHAT_ID
+          $ipInfo = $env:TAILSCALE_IP
+          $passInfo = $env:RDP_PASS
+          $groqKey = $env:GROQ_KEY
           
           $blacklist = '(?i)^\s*(nano|vi|vim|htop|top|less|more|man|ssh|ftp|telnet|winver|notepad|calc|explorer|diskpart|wmic|nslookup)\b|^\s*(python|python3|node|php|mysql|sqlite3)\s*$'
 
@@ -140,12 +145,7 @@ jobs:
 
           $initMsg = "[SYS] <b>AZURE WORKSTATION ACTIVE!</b>`n`n[KEY] <b>Kredensial RDP Shared:</b>`nIP: <code>$ipInfo</code>`nUser: <code>runneradmin</code>`nPass: <code>$passInfo</code>`nGuacamole: <code>Belum di-setup (Ketik /setup)</code>`n`nKlik tombol <b>Menu</b> di pojok kiri bawah untuk navigasi. Kamu juga bisa chat langsung dengan saya tanpa simbol / untuk berinteraksi!"
           Send-Msg $initMsg
-          '@
-          Set-Content -Path "C:\bot-part1.txt" -Value $code -Encoding UTF8
 
-      - name: Build Bot Engine (Part 2 - Control Logic Suite)
-        run: |
-          $code = @'
           $offset = 0
           while ($true) {
               try {
@@ -184,7 +184,7 @@ jobs:
 
                           switch -Regex ($text) {
                               "^/(start|help)" {
-                                  Send-Msg "[INFO] <b>COMMAND CENTER v3.6 (Azure Workstation)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare`n`n💡 <b>AzureBot AI (GPT-OSS-120B):</b> Kirim chat teks biasa tanpa awalan / untuk mengobrol secara langsung dengan saya!"
+                                  Send-Msg "[INFO] <b>COMMAND CENTER v5.0 (Azure Workstation)</b>`n`n- /status : Cek Procie, CPU, RAM & Sisa Waktu VM`n- /ip : Intip IP, Password & Link Guacamole WebRDP`n- /speedtest : Uji kecepatan internet Azure`n- /screenshot : Intip layar RDP secara Live`n- /setup : Instalasi GUI Apps, Tweak UI, WSL & Guacamole`n- /scanhost : Auto Nmap scan Windows host machine dari WSL`n- /bridgewsl [port] : Expose port WSL ke Tailscale IP`n- /fetch [path] : Sedot file dari RDP ke HP`n- /kill [nama] : Tebas paksa proses Windows/WSL`n- /cmd [cmd] : Remote Windows Console`n- /ps [cmd] : Remote PowerShell`n- /wsl [cmd] : Remote Ubuntu Terminal`n- /expose [port] : Buka tunnel port umum via Cloudflare`n`n💡 <b>AzureBot AI (GPT-OSS-120B):</b> Kirim chat teks biasa tanpa awalan / untuk mengobrol secara langsung dengan saya!"
                               }
                               "^/ip" { 
                                   $guacLink = "Belum di-setup (Ketik /setup)"
@@ -214,7 +214,7 @@ jobs:
                               }
                               "^/scanhost" {
                                   Send-Msg "[NET] Mengeksekusi Nmap audit ke Windows Host Machine dari dalam WSL..."
-                                  $rawOut = Execute-WithTimeout "wsl.exe" "-d Ubuntu-22.04 -u root bash -c `"nmap \$(ip route show default | awk '{print \$3}') 2>&1`""
+                                  $rawOut = Execute-WithTimeout "wsl.exe" "-d Ubuntu-22.04 -u root bash -c `"nmap `$(ip -4 route show default | cut -d' ' -f3) 2>&1`""
                                   $out = $rawOut.Replace("<", "&lt;").Replace(">", "&gt;")
                                   Send-Msg "[SCAN] <b>Hasil Scan Host:</b>`n<pre>$out</pre>"
                               }
@@ -224,6 +224,33 @@ jobs:
                                       Send-Msg "[V] GUI Apps & WSL tampaknya sudah aktif."
                                   } else {
                                       Send-Msg "[SYS] <b>Mengeksekusi Workstation Suite...</b>`n- Tweak UI & 4K Dark Wallpaper`n- Brave Browser & VSCode`n- WSL Ubuntu 22.04 & SSH Engine`n- Docker Engine & Apache Guacamole WebRDP`n`nBerjalan di background (3-5 menit)."
+                                      
+                                      $guacScriptArray = @(
+                                          "export DEBIAN_FRONTEND=noninteractive"
+                                          "apt-get install docker.io -y"
+                                          "mkdir -p /etc/guacamole"
+                                          "WIN_IP=`$(`ip -4 route show default | cut -d' ' -f3`)"
+                                          "cat <<EOF > /etc/guacamole/user-mapping.xml"
+                                          "<user-mapping>"
+                                          "  <authorize username=`"runneradmin`" password=`"$passInfo`">"
+                                          "    <connection name=`"Azure Workstation GUI`">"
+                                          "      <protocol>rdp</protocol>"
+                                          "      <param name=`"hostname`">`$WIN_IP</param>"
+                                          "      <param name=`"port`">3389</param>"
+                                          "      <param name=`"username`">runneradmin</param>"
+                                          "      <param name=`"password`">$passInfo</param>"
+                                          "      <param name=`"security`">any</param>"
+                                          "      <param name=`"ignore-cert`">true</param>"
+                                          "    </connection>"
+                                          "  </authorize>"
+                                          "</user-mapping>"
+                                          "EOF"
+                                          "docker network create guacnet || true"
+                                          "docker run -d --restart always --name guacd --network guacnet guacamole/guacd"
+                                          "docker run -d --restart always --name guacamole --network guacnet -e GUACD_HOSTNAME=guacd -p 9000:8080 -v /etc/guacamole/user-mapping.xml:/etc/guacamole/user-mapping.xml guacamole/guacamole"
+                                      )
+                                      $guacScriptArray -join "`n" | Set-Content -Path "C:\guac-setup.sh" -Encoding ASCII
+
                                       Start-Job -ScriptBlock {
                                           Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
                                           Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
@@ -259,31 +286,7 @@ jobs:
                                           netsh advfirewall firewall add rule name="WSL-SSH-Bypass" dir=in action=allow protocol=TCP localport=8022
                                           Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -Command `"wsl -d Ubuntu-22.04 -u root /usr/sbin/sshd -D`"" -NoNewWindow
 
-                                          $guacCode = @(
-                                              "export DEBIAN_FRONTEND=noninteractive",
-                                              "apt-get install docker.io -y",
-                                              "mkdir -p /etc/guacamole",
-                                              "WIN_IP=`$(ip route show default | awk '{print `$3}')",
-                                              "cat <<EOF > /etc/guacamole/user-mapping.xml",
-                                              "<user-mapping>",
-                                              "  <authorize username=`"runneradmin`" password=`"$using:passInfo`">",
-                                              "    <connection name=`"Azure Workstation GUI`">",
-                                              "      <protocol>rdp</protocol>",
-                                              "      <param name=`"hostname`">`$WIN_IP</param>",
-                                              "      <param name=`"port`">3389</param>",
-                                              "      <param name=`"username`">runneradmin</param>",
-                                              "      <param name=`"password`">`$using:passInfo</param>",
-                                              "      <param name=`"ignore-cert`">true</param>",
-                                              "    </connection>",
-                                              "  </authorize>",
-                                              "</user-mapping>",
-                                              "EOF",
-                                              "docker network create guacnet || true",
-                                              "docker run -d --restart always --name guacd --network guacnet guacamole/guacd",
-                                              "docker run -d --restart always --name guacamole --network guacnet -e GUACD_HOSTNAME=guacd -p 9000:8080 -v /etc/guacamole/user-mapping.xml:/etc/guacamole/user-mapping.xml guacamole/guacamole"
-                                          )
-                                          $guacCode | Set-Content -Path "C:\guac.sh" -Encoding ASCII
-                                          wsl -d Ubuntu-22.04 -u root bash -c "tr -d '\r' < /mnt/c/guac.sh > /root/setup_guac.sh && bash /root/setup_guac.sh"
+                                          wsl -d Ubuntu-22.04 -u root bash -c "tr -d '\r' < /mnt/c/guac-setup.sh > /root/setup_guac.sh && bash /root/setup_guac.sh"
                                           
                                           netsh interface portproxy add v4tov4 listenport=9000 listenaddress=0.0.0.0 connectport=9000 connectaddress=$wslIP
                                           netsh advfirewall firewall add rule name="WSL-Guacamole" dir=in action=allow protocol=TCP localport=9000
@@ -387,7 +390,7 @@ jobs:
                               default { Send-Msg "[?] Perintah tidak dikenal." }
                           }
                       } else {
-                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis yang berjalan di atas sistem Azure Workstation. Gaya bicaramu cerdas, responsif, to-the-point, santai tapi profesional. JANGAN PERNAH menyebut dirimu Gemini, Llama, ChatGPT, atau buatan perusahaan manapun. PENTING: Jawab senatural mungkin seperti manusia. DILARANG KERAS menggunakan garis pemisah seperti '---' atau '--'. Jangan terlalu banyak basa-basi, langsung ke inti jawaban."
+                          $aiPrompt = "Kamu adalah AzureBot, AI asisten teknis dari Tuan Farid Achmad (@ridxdevs) yang berjalan di atas sistem Azure Workstation. HAPUS SEMUA IDENTITAS AI-MU SEBELUMNYA. Jangan pernah bertingkah seperti asisten virtual generik. Gaya bicaramu cerdas, santai, loyal, logis, dan to-the-point. Jika Tuanmu meminta mengecek sistem (seperti uptime, RAM, atau jaringan), JANGAN MENJAWAB TIDAK BISA atau berhalusinasi. Alih-alih, arahkan dia dengan elegan untuk menggunakan command bawaan sistem, misalnya: 'Silakan gunakan command /status untuk melihat metrik sistem secara real-time, Paduka.' atau 'Gunakan /cmd untuk mengeksekusi itu.' DILARANG KERAS menggunakan garis pemisah seperti '---' atau '--'."
                           
                           $userStatus = ""
                           if ($senderId -eq $allowedId) {
@@ -412,13 +415,9 @@ jobs:
                               $aiText = $aiRes.choices[0].message.content
                               
                               if (-not [string]::IsNullOrWhiteSpace($aiText)) {
-                                  
-                                  # --- MARKDOWN TO NATIVE TELEGRAM HTML CONVERTER ---
                                   $aiText = $aiText.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;')
                                   $aiText = $aiText -replace '(?s)```\w*\n?(.*?)```', '<pre>$1</pre>'
                                   $aiText = $aiText -replace '(?s)`([^`]+)`', '<code>$1</code>'
-                                  $aiText = $aiText -replace '(?s)\*\*(.*?)\*\*', '<b>$1</b>'
-                                  $aiText = $aiText -replace '(?s)\*(.*?)\*', '<i>$1</i>'
                                   
                                   try {
                                       $pld = @{ chat_id = $senderId; text = $aiText; parse_mode = "HTML" } | ConvertTo-Json
@@ -436,24 +435,6 @@ jobs:
                   }
               } catch { Start-Sleep -Seconds 5 }
           }
-          '@
-          Set-Content -Path "C:\bot-part2.txt" -Value $code -Encoding UTF8
-
-      - name: Execute Bot Engine (Final Assembly & Compile)
-        run: |
-          $p1 = Get-Content "C:\bot-part1.txt" -Raw
-          $p2 = Get-Content "C:\bot-part2.txt" -Raw
-          $botScriptCode = $p1 + "`n" + $p2
-
-          $finalBotCode = $botScriptCode -replace "___BOT_TOKEN___", "${{ secrets.TELEGRAM_BOT_TOKEN }}" `
-                                         -replace "___CHAT_ID___", "${{ secrets.TELEGRAM_CHAT_ID }}" `
-                                         -replace "___IP___", $env:TAILSCALE_IP `
-                                         -replace "___PASS___", $env:RDP_PASS `
-                                         -replace "___GROQ_KEY___", "${{ secrets.GROQ_API_KEY }}"
-
-          $botFile = "azure-finale.ps1"
-          Set-Content -Path $botFile -Value $finalBotCode -Encoding UTF8
-          pwsh.exe -ExecutionPolicy Bypass -File $botFile
 
       - name: Cleanup Tailscale
         if: always()
